@@ -1,4 +1,4 @@
-# gold_club_bot.py (Yazım Hatası Düzeltilmiş Son Versiyon)
+# gold_club_bot.py (Gelişmiş Loglama İçin Güncellendi)
 
 import time, traceback, re, requests
 from selenium import webdriver
@@ -13,42 +13,45 @@ class GoldClubBot:
     def __init__(self, email, password, socketio=None, sid=None, target_group=None):
         self.email, self.password, self.socketio, self.sid, self.target_group = email, password, socketio, sid, target_group; self.driver, self.wait, self.base_url = None, None, "https://goldclubhosting.xyz/"
     
-    def _report_status(self, message):
+    # --- DEĞİŞİKLİK BURADA BAŞLIYOR ---
+    def _report_status(self, message, level='info'):
+        """Mesajları seviyelerine göre (info, warning, error) raporlar."""
         log_message = f"SID {self.sid or 'Scheduler'}: {message}"
         print(log_message)
         if self.socketio and self.sid:
-            self.socketio.emit('status_update', {'message': message}, to=self.sid)
+            # Socket.IO'ya mesajın seviyesini de gönderiyoruz
+            self.socketio.emit('status_update', {'message': message, 'level': level}, to=self.sid)
             self.socketio.sleep(0)
 
     def _find_element_with_retry(self, by, value, retries=3, delay=5):
         for i in range(retries):
             try: return self.wait.until(EC.visibility_of_element_located((by, value)))
             except TimeoutException:
-                if i < retries - 1: self._report_status(f"-> Element '{value}' bulunamadı. {delay} sn sonra tekrar deneniyor..."); time.sleep(delay)
+                if i < retries - 1:
+                    # Bu bir uyarı mesajı
+                    self._report_status(f"-> Element '{value}' bulunamadı. {delay} sn sonra tekrar deneniyor...", level='warning')
+                    time.sleep(delay)
                 else: raise
     
     def _click_element_with_retry(self, by, value, retries=3, delay=5):
         for i in range(retries):
             try: element = self.wait.until(EC.element_to_be_clickable((by, value))); element.click(); return
             except TimeoutException:
-                if i < retries - 1: self._report_status(f"-> Tıklanabilir element '{value}' bulunamadı. {delay} sn sonra tekrar deneniyor..."); time.sleep(delay)
+                if i < retries - 1:
+                    # Bu da bir uyarı
+                    self._report_status(f"-> Tıklanabilir element '{value}' bulunamadı. {delay} sn sonra tekrar deneniyor...", level='warning')
+                    time.sleep(delay)
                 else: raise
+    # --- DEĞİŞİKLİK BURADA BİTİYOR ---
 
     def _setup_driver(self):
         self._report_status("-> WebDriver hazırlanıyor (arka plan modu)...")
         try:
             options = webdriver.ChromeOptions(); options.add_argument('--headless'); options.add_argument('--no-sandbox'); options.add_argument('--disable-dev-shm-usage'); options.add_argument('--window-size=1920,1080'); options.add_argument('--log-level=3'); options.add_experimental_option("excludeSwitches", ["enable-automation"]); service = Service(ChromeDriverManager().install()); self.driver = webdriver.Chrome(service=service, options=options); self.wait = WebDriverWait(self.driver, 20)
-        except WebDriverException as e: self._report_status(f"[HATA] WebDriver başlatılamadı: {e.msg}"); raise
+        except WebDriverException as e: self._report_status(f"[HATA] WebDriver başlatılamadı: {e.msg}", level='error'); raise
     
     def _login(self):
-        self._report_status("-> Giriş yapılıyor..."); 
-        self.driver.get(f"{self.base_url}index.php?rp=/login"); 
-        self._find_element_with_retry(By.ID, "inputEmail").send_keys(self.email); 
-        self._find_element_with_retry(By.ID, "inputPassword").send_keys(self.password); 
-        # --- YAZIM HATASI BURADA DÜZELTİLDİ ---
-        # "self.click_element_with_retry" yerine doğru olan "self._click_element_with_retry" yazıldı.
-        self._click_element_with_retry(By.ID, "login"); 
-        self.wait.until(EC.url_contains("clientarea.php"))
+        self._report_status("-> Giriş yapılıyor..."); self.driver.get(f"{self.base_url}index.php?rp=/login"); self._find_element_with_retry(By.ID, "inputEmail").send_keys(self.email); self._find_element_with_retry(By.ID, "inputPassword").send_keys(self.password); self._click_element_with_retry(By.ID, "login"); self.wait.until(EC.url_contains("clientarea.php"))
     
     def _order_free_trial(self):
         self._report_status("-> Ücretsiz deneme sipariş ediliyor..."); self.driver.get(f"{self.base_url}index.php?rp=/store/free-trial"); self._click_element_with_retry(By.ID, "product7-order-button"); self._click_element_with_retry(By.ID, "checkout"); self._click_element_with_retry(By.XPATH, "//label[contains(., 'I have read and agree to the')]"); self._click_element_with_retry(By.ID, "btnCompleteOrder"); self.wait.until(EC.url_contains("cart.php?a=complete"))
@@ -70,7 +73,8 @@ class GoldClubBot:
         try:
             self._setup_driver(); self._login(); self._order_free_trial(); self._navigate_to_product_details(); return self._extract_data()
         except Exception as e:
-            error_message = f"[KRİTİK HATA] {type(e).__name__}: {e}"; self._report_status(error_message); traceback.print_exc()
+            # Bu bir hata mesajı
+            error_message = f"[KRİTİK HATA] {type(e).__name__}: {e}"; self._report_status(error_message, level='error'); traceback.print_exc()
             if self.socketio and self.sid: self.socketio.emit('process_error', {'error': str(e)}, to=self.sid)
             return {'error': error_message}
         finally: self._cleanup()
