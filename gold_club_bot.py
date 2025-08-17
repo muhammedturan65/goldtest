@@ -1,4 +1,4 @@
-# gold_club_bot.py (Selenium Kaldırılmış, Sadece Requests Kullanan Final Versiyon)
+# gold_club_bot.py (Selenium Kaldırılmış, Sağlamlaştırılmış Final Versiyon)
 
 import requests
 import re
@@ -23,12 +23,23 @@ class GoldClubBot:
         print(log_message)
         if self.socketio and self.sid:
             self.socketio.emit('status_update', {'message': message, 'level': level}, to=self.sid)
+            # Eventlet'in diğer işlemlere geçebilmesi için kısa bir bekleme
             self.socketio.sleep(0)
 
-    def _get_token(self, page_content):
+    def _get_token(self, page_content, form_action=""):
         """Sayfa içeriğinden gizli CSRF token'ını çeker."""
         soup = BeautifulSoup(page_content, 'html.parser')
-        token_input = soup.find('input', {'name': 'token'})
+        
+        # Eğer spesifik bir form belirtilmişse, o formun içindeki token'ı ara
+        if form_action:
+            form = soup.find('form', {'action': re.compile(form_action)})
+            if not form:
+                 raise Exception(f"'{form_action}' için form bulunamadı.")
+            token_input = form.find('input', {'name': 'token'})
+        else:
+            # Genel olarak ilk bulduğun token'ı al
+            token_input = soup.find('input', {'name': 'token'})
+
         if not token_input:
             raise Exception("CSRF token bulunamadı. Site yapısı değişmiş olabilir.")
         return token_input['value']
@@ -40,7 +51,7 @@ class GoldClubBot:
             response = self.session.get(login_page_url, timeout=15)
             response.raise_for_status()
             
-            token = self._get_token(response.text)
+            token = self._get_token(response.text, "dologin.php")
             
             payload = {
                 'token': token,
@@ -49,11 +60,10 @@ class GoldClubBot:
             }
             
             self._report_status("-> Giriş yapılıyor...")
-            login_response = self.session.post(login_page_url, data=payload, timeout=15)
+            login_response = self.session.post(f"{self.base_url}dologin.php", data=payload, timeout=15)
             login_response.raise_for_status()
 
-            # Başarılı girişten sonra URL'de "clientarea.php" olmalı
-            if "clientarea.php" not in login_response.url:
+            if "clientarea.php" not in login_response.url and "login" in login_response.url:
                 raise Exception("Giriş başarısız. Kullanıcı adı veya şifre hatalı olabilir.")
             
             self._report_status("-> Giriş başarılı!", level='info')
@@ -63,65 +73,66 @@ class GoldClubBot:
             raise
 
     def _order_free_trial(self):
-        self._report_status("-> Ücretsiz deneme sayfasına gidiliyor...")
-        order_page_url = f"{self.base_url}index.php?rp=/store/free-trial/order"
-        try:
-            response = self.session.get(order_page_url, timeout=15)
-            response.raise_for_status()
+        self._report_status("-> Mağaza sayfasına gidiliyor...")
+        client_area_url = f"{self.base_url}clientarea.php"
+        response = self.session.get(client_area_url, timeout=15)
+        response.raise_for_status()
 
-            soup = BeautifulSoup(response.text, 'html.parser')
-            # Sipariş için gerekli ürün ID'sini ve diğer form verilerini bul
-            pid_input = soup.find('input', {'name': 'pid'})
-            if not pid_input:
-                raise Exception("Ürün ID'si bulunamadı.")
-            
-            payload = {
-                'pid': pid_input['value'],
-                'billingcycle': 'onetime',
-                'submit': 'true'
-            }
-            
-            self._report_status("-> Sipariş oluşturuluyor...")
-            order_response = self.session.post(order_page_url, data=payload, timeout=15)
-            order_response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        order_link = soup.find('a', href=re.compile(r'cart\.php$'))
+        if not order_link:
+            raise Exception("Mağaza (Order New Services) linki bulunamadı.")
+        
+        store_url = f"{self.base_url}{order_link['href']}"
+        self._report_status("-> Ürün listesine erişiliyor...")
+        response = self.session.get(store_url, timeout=15)
+        response.raise_for_status()
 
-            if "/cart.php?a=confproduct" not in order_response.url:
-                raise Exception("Sipariş oluşturma adımı başarısız.")
+        soup = BeautifulSoup(response.text, 'html.parser')
+        free_trial_link = soup.find('a', href=re.compile(r'cart\.php\?a=add&pid=\d+'))
+        if not free_trial_link:
+            raise Exception("Ücretsiz deneme (Free Trial) sipariş linki bulunamadı.")
             
-            self._report_status("-> Sipariş oluşturuldu, onay sayfasına geçiliyor...")
-            
-            # Onay sayfasından son token'ı al
-            token = self._get_token(order_response.text)
+        order_page_url = f"{self.base_url}{free_trial_link['href']}"
+        self._report_status("-> Ücretsiz deneme sepet sayfasına gidiliyor...")
+        
+        response = self.session.get(order_page_url, timeout=15)
+        response.raise_for_status()
 
-            checkout_payload = {
-                'token': token,
-                'accepttos': 'on', # Şartları kabul et
-                'notes': '',
-                'paymentmethod': '', # Ücretsiz olduğu için boş
-                'checkout': 'true'
-            }
-            
-            self._report_status("-> Sipariş tamamlanıyor...")
-            final_response = self.session.post(f"{self.base_url}cart.php?a=checkout", data=checkout_payload, timeout=15)
-            final_response.raise_for_status()
-            
-            if "a=complete" not in final_response.url:
-                raise Exception("Sipariş tamamlama başarısız oldu.")
-            
-            self._report_status("-> Sipariş başarıyla tamamlandı!", level='info')
-            return final_response.text
+        soup = BeautifulSoup(response.text, 'html.parser')
+        checkout_link = soup.find('a', href=re.compile(r'cart\.php\?a=checkout'))
+        if not checkout_link:
+             raise Exception("Ödeme (Checkout) linki bulunamadı.")
 
-        except requests.RequestException as e:
-            self._report_status(f"Sipariş sırasında ağ hatası: {e}", level='error')
-            raise
+        checkout_url = f"{self.base_url}{checkout_link['href']}"
+        self._report_status("-> Ödeme sayfasına geçiliyor...")
+        response = self.session.get(checkout_url, timeout=15)
+        response.raise_for_status()
+        
+        token = self._get_token(response.text, "cart.php?a=checkout")
+        final_payload = {
+            'token': token,
+            'i_agree': 'on',
+            'notes': '',
+            'paymentmethod': '',
+            'submit': 'true'
+        }
+        
+        self._report_status("-> Sipariş tamamlanıyor...")
+        final_response = self.session.post(checkout_url, data=final_payload, timeout=15)
+        final_response.raise_for_status()
+        
+        if "a=complete" not in final_response.url:
+            raise Exception("Sipariş tamamlama başarısız oldu. Muhtemelen zaten aktif bir deneme sürümü var.")
+        
+        self._report_status("-> Sipariş başarıyla tamamlandı!", level='info')
+        return final_response.text
 
     def _extract_data(self, completion_page_content):
         self._report_status("-> Veriler çekiliyor...")
         soup = BeautifulSoup(completion_page_content, 'html.parser')
 
-        # Sipariş tamamlandıktan sonraki sayfada, ürün detaylarına giden bir link bulunur.
-        # Bu linki bularak doğrudan o sayfaya gidiyoruz.
-        details_link = soup.find('a', href=re.compile(r'view=products&action=productdetails'))
+        details_link = soup.find('a', href=re.compile(r'clientarea\.php\?action=productdetails'))
         if not details_link:
             raise Exception("Ürün detayları linki bulunamadı.")
             
@@ -134,17 +145,18 @@ class GoldClubBot:
         details_soup = BeautifulSoup(response.text, 'html.parser')
         
         m3u_input = details_soup.find('input', {'id': 'm3ulinks'})
-        expiry_div = details_soup.find('div', string=re.compile(r'Expiry Date:'))
         
-        if not m3u_input or not expiry_div:
+        # Bazen div içinde değil, bir tablonun içinde olabilir. Daha esnek bir arama yapalım.
+        expiry_date_element = details_soup.find(lambda tag: 'Expiry Date:' in tag.text and tag.name == 'div')
+        if not expiry_date_element:
+             raise Exception("Son kullanma tarihi bulunamadı.")
+        
+        expiry_date = expiry_date_element.find_next_sibling('div').strong.text.strip()
+        
+        if not m3u_input or not expiry_date:
             raise Exception("M3U linki veya son kullanma tarihi sayfada bulunamadı.")
             
         m3u_link = m3u_input['value']
-        # 'Expiry Date:' div'inin kardeş elementi olan 'strong' etiketini bul
-        expiry_date = expiry_div.find_next_sibling('div').strong.text.strip()
-        
-        if not (m3u_link and expiry_date):
-            raise Exception("M3U linki veya son kullanma tarihi alınamadı.")
         
         self._report_status("-> M3U Linki başarıyla alındı.", level='info')
         return {"url": m3u_link, "expiry": expiry_date}
