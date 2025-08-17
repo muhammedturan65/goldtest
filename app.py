@@ -1,10 +1,11 @@
-# app.py (Filtreleme Kaldırılmış, En Sade ve Stabil Final Versiyon)
+# app.py (Şifre Koruması Eklenmiş Final Versiyon)
 
 import os
 import sys
 import smtplib
 from datetime import datetime
-from flask import Flask, render_template_string, request, jsonify
+# session, redirect, url_for ve flash yetkilendirme için eklendi
+from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, flash
 from flask_socketio import SocketIO
 from flask_apscheduler import APScheduler
 from email.mime.text import MIMEText
@@ -21,13 +22,14 @@ if database_uri.startswith("postgres://"):
     database_uri = database_uri.replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_DATABASE_URI'] = database_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# SECRET_KEY, session'ların güvenli bir şekilde şifrelenmesi için KRİTİKTİR.
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default-super-secret-key-for-local-dev')
 
 db = SQLAlchemy(app)
 socketio = SocketIO(app, async_mode='eventlet')
 scheduler = APScheduler()
 
-# --- Veritabanı Modeli (Sadeleştirilmiş) ---
+# --- Veritabanı Modeli ---
 class GeneratedLink(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     m3u_url = db.Column(db.Text, nullable=False)
@@ -42,11 +44,18 @@ class GeneratedLink(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
-# --- Yapılandırma ve E-posta Fonksiyonları ---
+# --- Yapılandırma ---
 config = {}
 def load_config():
+    """Uygulama yapılandırmasını ortam değişkenlerinden yükler."""
     global config
     print("Yapılandırma ortam değişkenlerinden yükleniyor...")
+    # Uygulama şifresini oku
+    config['app_password'] = os.environ.get('APP_PASSWORD')
+    if not config['app_password']:
+        print("KRİTİK HATA: 'APP_PASSWORD' ortam değişkeni ayarlanmamış.")
+        sys.exit(1)
+        
     config['email'] = os.environ.get('GCB_EMAIL')
     config['password'] = os.environ.get('GCB_PASSWORD')
     if not config['email'] or not config['password']:
@@ -56,6 +65,7 @@ def load_config():
     config['notification'] = {"enabled": os.environ.get('NOTIF_ENABLED', 'false').lower() == 'true', "smtp_server": os.environ.get('SMTP_SERVER'), "smtp_port": int(os.environ.get('SMTP_PORT', 587)), "sender_email": os.environ.get('SENDER_EMAIL'), "sender_password": os.environ.get('SENDER_PASSWORD'), "receiver_email": os.environ.get('RECEIVER_EMAIL')}
     print("Yapılandırma başarıyla yüklendi.")
 
+# --- E-posta Fonksiyonu ---
 def send_email_notification(subject, body):
     notif_config = config.get('notification', {})
     if not notif_config.get('enabled') or not notif_config.get('sender_email'): return
@@ -66,7 +76,7 @@ def send_email_notification(subject, body):
         print(f"Bildirim e-postası başarıyla gönderildi: '{subject}'")
     except Exception as e: print(f"E-posta gönderilemedi: {e}")
 
-# --- BOT İŞLEMCİ FONKSİYONU (Sadeleştirilmiş) ---
+# --- BOT İŞLEMCİ FONKSİYONU ---
 def process_bot_run(sid=None):
     result_data = GoldClubBot(email=config['email'], password=config['password'], socketio=socketio, sid=sid).run_full_process()
     if "error" in result_data or not result_data.get('url'):
@@ -117,7 +127,49 @@ def cleanup_expired_links():
         except Exception as e:
             print(f"Temizlik görevi sırasında hata oluştu: {e}")
 
-# --- HTML TEMPLATE (Sadeleştirilmiş Arayüz) ---
+# --- HTML TEMPLATE'LER ---
+
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8"><title>Giriş Yap</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg-dark: #101014; --bg-card: rgba(30, 30, 35, 0.5); --border-color: rgba(255, 255, 255, 0.1); --text-primary: #f0f0f0; --text-secondary: #a0a0a0; --accent-grad: linear-gradient(90deg, #8A2387, #E94057, #F27121); --error-color: #f44336; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Manrope', sans-serif; background: var(--bg-dark); color: var(--text-primary); display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
+        .login-box { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 2rem; backdrop-filter: blur(20px); width: 100%; max-width: 400px; }
+        h1 { text-align: center; margin-bottom: 1.5rem; font-weight: 800;}
+        .form-group { margin-bottom: 1.5rem; }
+        label { display: block; margin-bottom: 0.5rem; color: var(--text-secondary); }
+        input[type="password"] { width: 100%; padding: 0.8rem 1rem; background-color: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); font-size: 1rem; }
+        input[type="password"]:focus { border-color: #E94057; outline: none; }
+        .btn { width: 100%; padding: 0.9rem; background: var(--accent-grad); color: white; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; font-weight: 700; }
+        .flash-error { background: rgba(244, 67, 54, 0.2); border: 1px solid var(--error-color); color: var(--error-color); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h1>Giriş Yap</h1>
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="flash-error">{{ messages[0] }}</div>
+            {% endif %}
+        {% endwith %}
+        <form method="post">
+            <div class="form-group">
+                <label for="password">Şifre</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit" class="btn">Giriş Yap</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
 HOME_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="tr">
@@ -143,6 +195,7 @@ HOME_TEMPLATE = """
         h1 { text-align: center; margin-bottom: 2rem; font-weight: 800; }
         .dashboard { display: grid; grid-template-columns: minmax(300px, 1fr) 2.5fr; gap: 2rem; align-items: flex-start; }
         .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.75rem; width: 100%; padding: 0.9rem; background: var(--accent-grad); color: white; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; font-weight: 700; margin-top: 1.5rem; text-decoration: none; }
+        .btn-logout { background: var(--error-color); margin-top: 1rem; }
         .btn:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 4px 20px rgba(233, 64, 87, 0.3); }
         .btn:disabled { background: #333; cursor: not-allowed; }
         .btn .spinner { animation: spin 1s linear infinite; }
@@ -179,6 +232,7 @@ HOME_TEMPLATE = """
         <div class="dashboard shell">
             <div>
                 <form id="control-form"><button type="submit" id="start-btn" class="btn"><i data-feather="play-circle"></i><span>Yeni M3U Linki Üret</span></button></form>
+                <a href="/logout" class="btn btn-logout">Çıkış Yap</a>
                 <h3 style="margin-top:2rem;color:var(--text-secondary);">Canlı Loglar</h3>
                 <div id="log-container"></div>
             </div>
@@ -210,10 +264,15 @@ HOME_TEMPLATE = """
             if (expiryDate < now) { rowClass = 'expired'; } 
             else if ((expiryDate - now) < oneDay) { rowClass = 'expiring'; }
 
+            const localCreationTime = new Date(item.created_at).toLocaleString('tr-TR', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+
             const copyButtonHTML = `<button class="btn-copy" onclick="copyLink(this, \`${item.m3u_url}\`)"><i data-feather="copy"></i></button>`;
             
             return `<tr id="history-row-${item.id}" class="${rowClass}">
-                <td data-label="Üretim">${new Date(item.created_at).toLocaleString('tr-TR')}</td>
+                <td data-label="Üretim">${localCreationTime}</td>
                 <td data-label="Son Kullanma">${item.expiry_date}</td>
                 <td data-label="M3U Linki" class="m3u-cell">
                     <div class="m3u-link">${item.m3u_url}</div>
@@ -277,11 +336,34 @@ HOME_TEMPLATE = """
 """
 
 # --- Flask Rotaları ---
+
 @app.route('/')
-def index(): return render_template_string(HOME_TEMPLATE)
+def index():
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
+    return render_template_string(HOME_TEMPLATE)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        password_attempt = request.form.get('password')
+        if password_attempt == config.get('app_password'):
+            session['logged_in'] = True
+            return redirect(url_for('index'))
+        else:
+            flash('Hatalı şifre. Lütfen tekrar deneyin.')
+            return redirect(url_for('login'))
+    return render_template_string(LOGIN_TEMPLATE)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 @app.route('/get_history')
 def get_history():
+    if 'logged_in' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
     links = GeneratedLink.query.order_by(desc(GeneratedLink.id)).limit(20).all()
     return jsonify([link.to_dict() for link in links])
 
