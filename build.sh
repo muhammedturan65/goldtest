@@ -10,13 +10,11 @@ pip config set global.cache-dir "$(pwd)/.cache/pip"
 pip install -r requirements.txt
 
 # Google Chrome'u yüklemek için gerekli paketleri kur
-# YÖNETİCİ İZNİ GEREKTİĞİ İÇİN BAŞLARINA 'sudo' EKLENDİ
-sudo apt-get update
-sudo apt-get install -y wget unzip fontconfig
+# Render bu komutları zaten yönetici olarak çalıştırdığı için 'sudo'ya gerek yok.
+apt-get update
+apt-get install -y wget unzip fontconfig
 
 # En son kararlı Chrome sürümünü indir ve kur
 wget -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-
-# YÖNETİCİ İZNİ GEREKTİĞİ İÇİN BAŞINA 'sudo' EKLENDİ
-sudo apt-get install -y /tmp/google-chrome.deb
+apt-get install -y /tmp/google-chrome.deb
 rm /tmp/google-chrome.deb
