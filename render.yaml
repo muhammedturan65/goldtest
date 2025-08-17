@@ -1,19 +1,19 @@
-# render.yaml (Düzeltilmiş Versiyon)
+# render.yaml (Son Düzeltilmiş Versiyon)
 services:
   - type: web
     name: goldclub-manager
     env: python
-    plan: starter # Ücretsiz plan, kaynak yetersiz kalırsa yükseltebilirsiniz
+    plan: starter
     buildCommand: "./build.sh"
     startCommand: "gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT app:app"
     healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION
-        value: 3.10.6 # Kullandığınız Python sürümüne göre ayarlayın
+        value: 3.10.6
       - key: GCB_EMAIL
-        sync: false # Render dashboard'undan ayarlanacak
+        sync: false
       - key: GCB_PASSWORD
-        sync: false # Render dashboard'undan ayarlanacak
+        sync: false
       - key: NOTIF_ENABLED
         value: "true"
       - key: SMTP_SERVER
@@ -36,9 +36,9 @@ services:
         value: "TURKISH"
         
     # --- DÜZELTME BURADA ---
-    # 'disks:' bölümü 'name', 'env', 'plan' gibi diğer servis
-    # özellikleriyle aynı hizada olmalıdır.
-    disks:
-      - name: goldclub-data
-        mountPath: /var/data/goldclub
-        sizeGB: 1
+    # Anahtar kelime 'disks' (çoğul) yerine 'disk' (tekil) olmalı
+    # ve altındaki liste (-) işareti kaldırılmalı.
+    disk:
+      name: goldclub-data
+      mountPath: /var/data/goldclub
+      sizeGB: 1
