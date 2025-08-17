@@ -1,4 +1,4 @@
-# app.py (Çok Kullanıcılı Sistem Eklenmiş Final Versiyon)
+# app.py (Selenium Kaldırılmış, Sadece Requests Kullanan Final Versiyon)
 
 import os
 import sys
@@ -13,7 +13,6 @@ from gold_club_bot import GoldClubBot
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
-# Şifre hash'leme için gerekli kütüphane
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # --- Flask ve Veritabanı Kurulumu ---
@@ -89,7 +88,9 @@ def process_bot_run(user_id, sid=None):
         print(f"Hata: Kullanıcı ID {user_id} bulunamadı.")
         return {"error": "Geçersiz kullanıcı."}
 
+    # Selenium'dan arındırılmış yeni botu çağırıyoruz
     result_data = GoldClubBot(email=config['email'], password=config['password'], socketio=socketio, sid=sid).run_full_process()
+    
     if "error" in result_data or not result_data.get('url'):
         error_message = result_data.get('error', 'Bilinmeyen bir hata oluştu veya link alınamadı.')
         send_email_notification("Link Oluşturma Başarısız Oldu", f"Hata: {error_message}", user.username)
@@ -112,8 +113,6 @@ def process_bot_run(user_id, sid=None):
 # --- ZAMANLANMIŞ GÖREVLER ---
 def scheduled_task():
     print("Zamanlanmış görevler bu çok kullanıcılı yapıda yeniden düşünülmeli. Şimdilik devre dışı.")
-    # Not: Bu görevi aktif etmek için hangi kullanıcı adına çalışacağına karar verilmelidir.
-    # Örneğin, tüm kullanıcılar için otomatik link üretilebilir veya belirli bir admin kullanıcısı için.
 
 def cleanup_expired_links():
     print("Süresi dolmuş linkler için temizlik görevi başlatılıyor...");
@@ -412,7 +411,7 @@ def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
     user = User.query.get(session['user_id'])
-    if not user: # Güvenlik önlemi: session'da kalmış ama silinmiş bir kullanıcı varsa
+    if not user:
         session.clear()
         return redirect(url_for('login'))
     return render_template_string(HOME_TEMPLATE, username=user.username)
@@ -449,7 +448,6 @@ def register():
         new_user.set_password(password)
         db.session.add(new_user)
         db.session.commit()
-        session['user_id'] = new_user.id
         flash('Hesabınız başarıyla oluşturuldu! Şimdi giriş yapabilirsiniz.')
         return redirect(url_for('login'))
     return render_template_string(REGISTER_TEMPLATE)
@@ -484,17 +482,13 @@ def handle_start_process(data):
 # --- Uygulama Başlatma ---
 with app.app_context():
     load_config()
-    db.create_all() # User ve GeneratedLink tablolarını oluşturur/günceller
+    db.create_all()
     
     scheduler_config = config.get('scheduler', {})
     if scheduler_config.get('enabled'):
         scheduler.init_app(app)
         scheduler.start()
-        # Not: Zamanlanmış görevler artık hangi kullanıcı için çalışacağı belli olmadığı için varsayılan olarak devre dışı bırakılmıştır.
-        # İstenirse belirli bir admin kullanıcısı için çalışacak şekilde düzenlenebilir.
-        # if not scheduler.get_job('scheduled_bot_task'):
-        #      scheduler.add_job(id='scheduled_bot_task', func=scheduled_task, trigger='cron', hour=scheduler_config.get('hour', 4), minute=scheduler_config.get('minute', 0))
-        #      print(f"Zamanlanmış link üretme görevi kuruldu.")
+        # Not: Zamanlanmış link üretme görevi çok kullanıcılı yapıda mantıklı olmadığı için devre dışı bırakıldı.
         
         if not scheduler.get_job('cleanup_task'):
              cleanup_hour = (scheduler_config.get('hour', 4) + 1) % 24 
