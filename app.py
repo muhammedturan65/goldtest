@@ -1,10 +1,9 @@
-# app.py (Telegram Kütüphane Sürüm Çakışması Düzeltilmiş Final Versiyon)
+# app.py (Saat Dilimi Düzeltmesi Dahil Final Versiyon)
 
 import os
 import sys
 import smtplib
-import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, flash
 from flask_socketio import SocketIO
 from flask_apscheduler import APScheduler
@@ -14,10 +13,6 @@ from gold_club_bot import GoldClubBot
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
-
-# Uyumlu (eski) kütüphane sürümü için gerekli importlar
-import telegram
-from telegram.ext import Updater, CommandHandler
 
 # --- Flask ve Veritabanı Kurulumu ---
 app = Flask(__name__)
@@ -52,10 +47,6 @@ config = {}
 def load_config():
     global config
     print("Yapılandırma ortam değişkenlerinden yükleniyor...")
-    config['telegram_token'] = os.environ.get('TELEGRAM_BOT_TOKEN')
-    config['telegram_chat_id'] = os.environ.get('TELEGRAM_CHAT_ID')
-    if not config['telegram_token'] or not config['telegram_chat_id']:
-        print("[UYARI] Telegram bot token veya chat ID bulunamadı. Telegram özellikleri devre dışı kalacak.")
     config['app_password'] = os.environ.get('APP_PASSWORD')
     if not config['app_password']:
         print("KRİTİK HATA: 'APP_PASSWORD' ortam değişkeni ayarlanmamış.")
@@ -69,16 +60,7 @@ def load_config():
     config['notification'] = {"enabled": os.environ.get('NOTIF_ENABLED', 'false').lower() == 'true', "smtp_server": os.environ.get('SMTP_SERVER'), "smtp_port": int(os.environ.get('SMTP_PORT', 587)), "sender_email": os.environ.get('SENDER_EMAIL'), "sender_password": os.environ.get('SENDER_PASSWORD'), "receiver_email": os.environ.get('RECEIVER_EMAIL')}
     print("Yapılandırma başarıyla yüklendi.")
 
-# --- BİLDİRİM FONKSİYONLARI ---
-def send_telegram_message(message):
-    if config.get('telegram_token') and config.get('telegram_chat_id'):
-        try:
-            bot = telegram.Bot(token=config['telegram_token'])
-            bot.send_message(chat_id=config['telegram_chat_id'], text=message, parse_mode=telegram.ParseMode.HTML)
-            print("Telegram mesajı başarıyla gönderildi.")
-        except Exception as e:
-            print(f"Telegram mesajı gönderilemedi: {e}")
-
+# --- E-posta Fonksiyonu ---
 def send_email_notification(subject, body):
     notif_config = config.get('notification', {})
     if not notif_config.get('enabled') or not notif_config.get('sender_email'): return
@@ -90,45 +72,27 @@ def send_email_notification(subject, body):
     except Exception as e: print(f"E-posta gönderilemedi: {e}")
 
 # --- BOT İŞLEMCİ FONKSİYONU ---
-def process_bot_run(sid=None, source="Bilinmiyor"):
+def process_bot_run(sid=None):
     result_data = GoldClubBot(email=config['email'], password=config['password'], socketio=socketio, sid=sid).run_full_process()
     if "error" in result_data or not result_data.get('url'):
         error_message = result_data.get('error', 'Bilinmeyen bir hata oluştu veya link alınamadı.')
-        subject = "Link Oluşturma Başarısız Oldu"
-        body_html = f"<b>Kaynak:</b> {source}<br><b>Hata:</b> {error_message}"
-        send_email_notification(subject, body_html)
-        send_telegram_message(body_html)
+        send_email_notification("Link Oluşturma Başarısız Oldu", f"Hata: {error_message}")
         return {"error": error_message}
     new_link = GeneratedLink(m3u_url=result_data['url'], expiry_date=result_data['expiry'])
     db.session.add(new_link)
     db.session.commit()
     new_link_data = new_link.to_dict()
     subject = "Yeni M3U Linki Oluşturuldu"
-    body_html = f"<b>Kaynak:</b> {source}<br><p>Yeni bir M3U linki başarıyla oluşturuldu.</p><ul><li><b>Link:</b> <code>{result_data['url']}</code></li><li><b>Son Kullanma:</b> {result_data['expiry']}</li></ul>"
-    send_email_notification(subject, body_html)
-    send_telegram_message(body_html)
+    body = f"<p>Yeni bir M3U linki başarıyla oluşturuldu.</p><ul><li><b>Link:</b> {result_data['url']}</li><li><b>Son Kullanma:</b> {result_data['expiry']}</li></ul>"
+    send_email_notification(subject, body)
     return {"new_link": new_link_data}
 
 # --- ZAMANLANMIŞ GÖREVLER ---
-def smart_scheduler_task():
-    print("Akıllı zamanlayıcı kontrolü başlatılıyor...");
+def scheduled_task():
+    print("Zamanlanmış link üretme görevi başlatılıyor...");
     with app.app_context():
-        last_link = GeneratedLink.query.order_by(desc(GeneratedLink.id)).first()
-        if not last_link:
-            print("Veritabanında hiç link yok. İlk link üretiliyor...")
-            process_bot_run(source="Akıllı Zamanlayıcı (İlk Çalışma)")
-            return
-        try:
-            expiry_dt = datetime.strptime(last_link.expiry_date, "%A, %B %d, %Y")
-            time_left = expiry_dt - datetime.now()
-            if time_left < timedelta(hours=24):
-                print(f"Linkin süresinin dolmasına {time_left} kaldı. Yeni link üretiliyor...")
-                process_bot_run(source="Akıllı Zamanlayıcı (Otomatik Yenileme)")
-            else:
-                print(f"Linkin süresi hala geçerli ({time_left} kaldı). İşlem yapılmadı.")
-        except ValueError:
-            print(f"ID #{last_link.id} için tarih formatı anlaşılamadı, güvenlik için yeni link üretiliyor.")
-            process_bot_run(source="Akıllı Zamanlayıcı (Tarih Hatası)")
+        process_bot_run()
+    print("Zamanlanmış link üretme görevi tamamlandı.")
 
 def cleanup_expired_links():
     print("Süresi dolmuş linkler için temizlik görevi başlatılıyor...");
@@ -154,6 +118,7 @@ def cleanup_expired_links():
             print(f"Temizlik görevi sırasında hata oluştu: {e}")
 
 # --- HTML TEMPLATE'LER ---
+
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="tr">
@@ -280,6 +245,7 @@ HOME_TEMPLATE = """
         const startBtn = document.getElementById('start-btn');
         const logContainer = document.getElementById('log-container');
         const historyBody = document.getElementById('history-body');
+
         function renderHistoryRow(item) {
             const expiryDate = new Date(item.expiry_date.replace(/,/, ''));
             const now = new Date();
@@ -287,11 +253,16 @@ HOME_TEMPLATE = """
             let rowClass = '';
             if (expiryDate < now) { rowClass = 'expired'; } 
             else if ((expiryDate - now) < oneDay) { rowClass = 'expiring'; }
+
+            // *** SAAT DİLİMİ DÜZELTMESİ BURADA ***
+            // Sunucudan gelen UTC tarihini (item.created_at) tarayıcının yerel saatine çevirip formatlıyoruz.
             const localCreationTime = new Date(item.created_at).toLocaleString('tr-TR', {
                 year: 'numeric', month: '2-digit', day: '2-digit',
                 hour: '2-digit', minute: '2-digit', second: '2-digit'
             });
+
             const copyButtonHTML = `<button class="btn-copy" onclick="copyLink(this, \`${item.m3u_url}\`)"><i data-feather="copy"></i></button>`;
+            
             return `<tr id="history-row-${item.id}" class="${rowClass}">
                 <td data-label="Üretim">${localCreationTime}</td>
                 <td data-label="Son Kullanma">${item.expiry_date}</td>
@@ -301,6 +272,7 @@ HOME_TEMPLATE = """
                 </td>
             </tr>`;
         }
+
         async function fetchHistory() { 
             try { 
                 const res = await fetch('/get_history?t=' + new Date().getTime());
@@ -310,11 +282,13 @@ HOME_TEMPLATE = """
                 feather.replace();
             } catch (e) { console.error(e); } 
         }
+
         function copyLink(button, textToCopy) {
             navigator.clipboard.writeText(textToCopy).then(() => {
                 Toastify({ text: "Link panoya kopyalandı!", duration: 3000, gravity: "bottom", position: "right", style: { background: "var(--success-color)" } }).showToast();
             });
         }
+
         document.getElementById('control-form').addEventListener('submit', (e) => {
             e.preventDefault();
             startBtn.disabled = true;
@@ -323,6 +297,7 @@ HOME_TEMPLATE = """
             logContainer.innerHTML = '';
             socket.emit('start_process', {});
         });
+        
         socket.on('process_complete', (data) => {
             startBtn.disabled = false;
             startBtn.innerHTML = '<i data-feather="play-circle"></i><span>Yeni M3U Linki Üret</span>';
@@ -332,58 +307,39 @@ HOME_TEMPLATE = """
             feather.replace();
             Toastify({ text: "Yeni link başarıyla üretildi!", duration: 4000, gravity: "bottom", position: "right", style: { background: "var(--accent-grad)" } }).showToast();
         });
+
         socket.on('status_update', (data) => {
             const level = data.level || 'info';
             logContainer.innerHTML += `<div class="log-line ${level}">${data.message.replace(/</g, "&lt;")}</div>`;
             logContainer.scrollTop = logContainer.scrollHeight;
         });
+
         socket.on('process_error', (data) => {
             logContainer.innerHTML += `<div class="log-line error">HATA: ${data.error.replace(/</g, "&lt;")}</div>`;
             startBtn.disabled = false;
             startBtn.innerHTML = '<i data-feather="alert-triangle"></i><span>Tekrar Dene</span>';
             feather.replace();
         });
+        
         document.addEventListener('DOMContentLoaded', fetchHistory);
     </script>
 </body>
 </html>
 """
 
-# --- TELEGRAM BOT KOMUTLARI (Uyumlu Sürüme Geri Döndürüldü) ---
-def start_command(update, context):
-    update.message.reply_text('Merhaba! M3U Link Botuna hoş geldiniz. /yenilink veya /sonlink komutlarını kullanabilirsiniz.')
+# --- Flask Rotaları ---
 
-def get_latest_link_command(update, context):
-    with app.app_context():
-        last_link = GeneratedLink.query.order_by(desc(GeneratedLink.id)).first()
-        if last_link:
-            local_creation_time = last_link.created_at + timedelta(hours=3) # UTC'den UTC+3'e çevirme
-            message = (f"<b>En Son M3U Linki</b>\n\n"
-                       f"<b>Üretim Zamanı (TSİ):</b> {local_creation_time.strftime('%d.%m.%Y %H:%M:%S')}\n"
-                       f"<b>Son Kullanma:</b> {last_link.expiry_date}\n\n"
-                       f"<code>{last_link.m3u_url}</code>")
-            update.message.reply_html(message)
-        else:
-            update.message.reply_text('Veritabanında henüz kayıtlı bir link bulunmuyor.')
-
-def generate_new_link_command(update, context):
-    update.message.reply_text('Yeni link üretme işlemi başlatıldı... Bu işlem 1-2 dakika sürebilir. Sonuç size mesaj olarak gönderilecektir.')
-    threading.Thread(target=run_process_for_telegram).start()
-
-def run_process_for_telegram():
-    with app.app_context():
-        process_bot_run(source="Telegram Komutu")
-
-# --- Flask Rotaları ve Socket.IO ---
 @app.route('/')
 def index():
-    if 'logged_in' not in session: return redirect(url_for('login'))
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
     return render_template_string(HOME_TEMPLATE)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        if request.form.get('password') == config.get('app_password'):
+        password_attempt = request.form.get('password')
+        if password_attempt == config.get('app_password'):
             session['logged_in'] = True
             return redirect(url_for('index'))
         else:
@@ -398,16 +354,18 @@ def logout():
 
 @app.route('/get_history')
 def get_history():
-    if 'logged_in' not in session: return jsonify({"error": "Unauthorized"}), 401
+    if 'logged_in' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
     links = GeneratedLink.query.order_by(desc(GeneratedLink.id)).limit(20).all()
     return jsonify([link.to_dict() for link in links])
 
+# --- SocketIO Olayları ---
 @socketio.on('start_process')
 def handle_start_process(data):
     sid = request.sid
     def background_task_wrapper(sid):
         with app.app_context():
-            result = process_bot_run(sid=sid, source="Web Arayüzü")
+            result = process_bot_run(sid)
         if "error" in result: socketio.emit('process_error', {'error': result['error']}, to=sid)
         else: socketio.emit('process_complete', {'new_link': result['new_link']}, to=sid)
     socketio.start_background_task(background_task_wrapper, sid)
@@ -417,25 +375,15 @@ with app.app_context():
     load_config()
     db.create_all()
     
-    scheduler.init_app(app)
-    scheduler.start()
-    if config['scheduler'].get('enabled'):
-        if not scheduler.get_job('smart_scheduler_task'):
-             scheduler.add_job(id='smart_scheduler_task', func=smart_scheduler_task, trigger='interval', hours=1)
-             print("Akıllı zamanlayıcı kuruldu: Her saat başı kontrol edilecek.")
-    
-    if not scheduler.get_job('cleanup_task'):
-         scheduler.add_job(id='cleanup_task', func=cleanup_expired_links, trigger='cron', hour=5, minute=0)
-         print("Zamanlanmış veritabanı temizlik görevi kuruldu: Her gün saat 05:00 (UTC)")
-
-    # TELEGRAM BOTUNU BAŞLATMA (Uyumlu Sürüm Yapısı)
-    if config.get('telegram_token'):
-        print("Telegram botu başlatılıyor (uyumlu mod)...")
-        updater = Updater(config['telegram_token'], use_context=True)
-        dp = updater.dispatcher
-        dp.add_handler(CommandHandler("start", start_command))
-        dp.add_handler(CommandHandler("sonlink", get_latest_link_command))
-        dp.add_handler(CommandHandler("yenilink", generate_new_link_command))
+    scheduler_config = config.get('scheduler', {})
+    if scheduler_config.get('enabled'):
+        scheduler.init_app(app)
+        scheduler.start()
+        if not scheduler.get_job('scheduled_bot_task'):
+             scheduler.add_job(id='scheduled_bot_task', func=scheduled_task, trigger='cron', hour=scheduler_config.get('hour', 4), minute=scheduler_config.get('minute', 0))
+             print(f"Zamanlanmış link üretme görevi kuruldu: Her gün saat {scheduler_config.get('hour', 4):02d}:{scheduler_config.get('minute', 0):02d}")
         
-        threading.Thread(target=updater.start_polling, daemon=True).start()
-        print("Telegram botu başarıyla başlatıldı ve komutları dinliyor.")
+        if not scheduler.get_job('cleanup_task'):
+             cleanup_hour = (scheduler_config.get('hour', 4) + 1) % 24 
+             scheduler.add_job(id='cleanup_task', func=cleanup_expired_links, trigger='cron', hour=cleanup_hour, minute=scheduler_config.get('minute', 0))
+             print(f"Zamanlanmış veritabanı temizlik görevi kuruldu: Her gün saat {cleanup_hour:02d}:{scheduler_config.get('minute', 0):02d}")
