@@ -1,4 +1,4 @@
-# gold_club_bot.py (Sadeleştirilmiş Versiyon)
+# gold_club_bot.py (Yazım Hatası Düzeltilmiş Son Versiyon)
 
 import time, traceback, re, requests
 from selenium import webdriver
@@ -34,9 +34,6 @@ class GoldClubBot:
                 if i < retries - 1: self._report_status(f"-> Tıklanabilir element '{value}' bulunamadı. {delay} sn sonra tekrar deneniyor..."); time.sleep(delay)
                 else: raise
 
-    # --- BU FONKSİYON ARTIK KULLANILMAYACAK ---
-    # def _parse_playlist(self, m3u_url): ...
-
     def _setup_driver(self):
         self._report_status("-> WebDriver hazırlanıyor (arka plan modu)...")
         try:
@@ -44,7 +41,14 @@ class GoldClubBot:
         except WebDriverException as e: self._report_status(f"[HATA] WebDriver başlatılamadı: {e.msg}"); raise
     
     def _login(self):
-        self._report_status("-> Giriş yapılıyor..."); self.driver.get(f"{self.base_url}index.php?rp=/login"); self._find_element_with_retry(By.ID, "inputEmail").send_keys(self.email); self._find_element_with_retry(By.ID, "inputPassword").send_keys(self.password); self.click_element_with_retry(By.ID, "login"); self.wait.until(EC.url_contains("clientarea.php"))
+        self._report_status("-> Giriş yapılıyor..."); 
+        self.driver.get(f"{self.base_url}index.php?rp=/login"); 
+        self._find_element_with_retry(By.ID, "inputEmail").send_keys(self.email); 
+        self._find_element_with_retry(By.ID, "inputPassword").send_keys(self.password); 
+        # --- YAZIM HATASI BURADA DÜZELTİLDİ ---
+        # "self.click_element_with_retry" yerine doğru olan "self._click_element_with_retry" yazıldı.
+        self._click_element_with_retry(By.ID, "login"); 
+        self.wait.until(EC.url_contains("clientarea.php"))
     
     def _order_free_trial(self):
         self._report_status("-> Ücretsiz deneme sipariş ediliyor..."); self.driver.get(f"{self.base_url}index.php?rp=/store/free-trial"); self._click_element_with_retry(By.ID, "product7-order-button"); self._click_element_with_retry(By.ID, "checkout"); self._click_element_with_retry(By.XPATH, "//label[contains(., 'I have read and agree to the')]"); self._click_element_with_retry(By.ID, "btnCompleteOrder"); self.wait.until(EC.url_contains("cart.php?a=complete"))
@@ -57,7 +61,6 @@ class GoldClubBot:
         if not (m3u_link and expiry_date): raise Exception("M3U linki veya son kullanma tarihi alınamadı.")
         
         self._report_status("-> M3U Linki başarıyla alındı.");
-        # Artık M3U ayrıştırması yapmıyoruz, sadece linki ve tarihi döndürüyoruz.
         return {"url": m3u_link, "expiry": expiry_date}
     
     def _cleanup(self):
