@@ -1,4 +1,4 @@
-# gold_club_bot.py (Login Hatası Düzeltilmiş Final Versiyon)
+# gold_club_bot.py (Sipariş Hatası Düzeltilmiş Final Requests Versiyonu)
 
 import requests
 import re
@@ -25,17 +25,10 @@ class GoldClubBot:
             self.socketio.emit('status_update', {'message': message, 'level': level}, to=self.sid)
             self.socketio.sleep(0)
 
-    def _get_token(self, page_content, form_action=None):
+    def _get_token(self, page_content):
         """Sayfa içeriğinden gizli CSRF token'ını çeker."""
         soup = BeautifulSoup(page_content, 'html.parser')
-        
-        if form_action:
-            form = soup.find('form', {'action': re.compile(form_action)})
-            if not form:
-                 raise Exception(f"'{form_action}' için form bulunamadı.")
-            token_input = form.find('input', {'name': 'token'})
-        else:
-            token_input = soup.find('input', {'name': 'token'})
+        token_input = soup.find('input', {'name': 'token'})
 
         if not token_input:
             raise Exception("CSRF token bulunamadı. Site yapısı değişmiş olabilir.")
@@ -48,8 +41,6 @@ class GoldClubBot:
             response = self.session.get(login_page_url, timeout=15)
             response.raise_for_status()
             
-            # Formun action'ı boş olduğu için, form verilerini login sayfasının kendisine gönderiyoruz.
-            # Token'ı da spesifik bir form aramadan, sayfadaki ilk token olarak alıyoruz.
             token = self._get_token(response.text)
             
             payload = {
@@ -59,7 +50,6 @@ class GoldClubBot:
             }
             
             self._report_status("-> Giriş yapılıyor...")
-            # Post isteğini 'dologin.php' yerine 'login_page_url'e yapıyoruz.
             login_response = self.session.post(login_page_url, data=payload, timeout=15)
             login_response.raise_for_status()
 
@@ -73,48 +63,38 @@ class GoldClubBot:
             raise
 
     def _order_free_trial(self):
-        self._report_status("-> Mağaza sayfasına gidiliyor...")
-        client_area_url = f"{self.base_url}clientarea.php"
-        response = self.session.get(client_area_url, timeout=15)
+        self._report_status("-> Ücretsiz deneme sayfasına doğrudan gidiliyor...")
+        free_trial_url = f"{self.base_url}index.php?rp=/store/free-trial"
+        
+        response = self.session.get(free_trial_url, timeout=15)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
-        order_link = soup.find('a', href=re.compile(r'cart\.php$'))
+        order_link = soup.find('a', href=re.compile(r'cart\.php\?a=add&pid=\d+'))
         if not order_link:
-            raise Exception("Mağaza (Order New Services) linki bulunamadı.")
-        
-        store_url = f"{self.base_url}{order_link['href']}"
-        self._report_status("-> Ürün listesine erişiliyor...")
-        response = self.session.get(store_url, timeout=15)
-        response.raise_for_status()
+            raise Exception("Özel deneme sayfasında sipariş linki (Order Now) bulunamadı.")
 
-        soup = BeautifulSoup(response.text, 'html.parser')
-        free_trial_link = soup.find('a', href=re.compile(r'cart\.php\?a=add&pid=\d+'))
-        if not free_trial_link:
-            raise Exception("Ücretsiz deneme (Free Trial) sipariş linki bulunamadı.")
-            
-        order_page_url = f"{self.base_url}{free_trial_link['href']}"
-        self._report_status("-> Ücretsiz deneme sepet sayfasına gidiliyor...")
-        
-        response = self.session.get(order_page_url, timeout=15)
+        add_to_cart_url = f"{self.base_url}{order_link['href']}"
+        self._report_status("-> Ürün sepete ekleniyor...")
+        response = self.session.get(add_to_cart_url, timeout=15)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
         checkout_link = soup.find('a', href=re.compile(r'cart\.php\?a=checkout'))
         if not checkout_link:
-             raise Exception("Ödeme (Checkout) linki bulunamadı.")
-
+            raise Exception("Sepet sayfasında ödeme (Checkout) linki bulunamadı.")
+        
         checkout_url = f"{self.base_url}{checkout_link['href']}"
         self._report_status("-> Ödeme sayfasına geçiliyor...")
         response = self.session.get(checkout_url, timeout=15)
         response.raise_for_status()
-        
+
         token = self._get_token(response.text)
         final_payload = {
             'token': token,
             'i_agree': 'on',
             'notes': '',
-            'paymentmethod': 'stripe', # Genellikle varsayılan bir değer seçmek gerekir.
+            'paymentmethod': 'stripe',
             'submit': 'true'
         }
         
@@ -123,9 +103,8 @@ class GoldClubBot:
         final_response.raise_for_status()
         
         if "a=complete" not in final_response.url:
-            # Hata mesajını daha net göstermek için sayfa içeriğini loglayalım
             soup_error = BeautifulSoup(final_response.text, 'html.parser')
-            error_div = soup_error.find('div', class_='alert-danger')
+            error_div = soup_error.find('div', class_=re.compile(r'alert-danger|alert-error'))
             error_message = error_div.text.strip() if error_div else "Bilinmeyen bir hata oluştu."
             raise Exception(f"Sipariş tamamlama başarısız oldu: {error_message}")
         
