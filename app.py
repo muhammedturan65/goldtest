@@ -427,7 +427,7 @@ def handle_start_process(data):
         else: socketio.emit('process_complete', {'new_link': result['new_link']}, to=sid)
     socketio.start_background_task(background_task_wrapper, sid)
 
-# --- Uygulama Başlatma ---
+# --- UYGULAMA BAŞLATMA ---
 with app.app_context():
     load_config()
     db.create_all()
@@ -443,12 +443,20 @@ with app.app_context():
          scheduler.add_job(id='cleanup_task', func=cleanup_expired_links, trigger='cron', hour=5, minute=0)
          print("Zamanlanmış veritabanı temizlik görevi kuruldu: Her gün saat 05:00 (UTC)")
 
+    # TELEGRAM BOTUNU BAŞLATMA
     if config.get('telegram_token'):
         print("Telegram botu başlatılıyor...")
-        updater = Updater(config['telegram_token'], use_context=True)
+        
+        # --- DEĞİŞİKLİK BURADA ---
+        # 'use_context=True' parametresi kütüphanenin yeni sürümlerinde
+        # kaldırıldığı için bu satırdan siliyoruz.
+        updater = Updater(config['telegram_token'])
+        
         dp = updater.dispatcher
         dp.add_handler(CommandHandler("start", start_command))
         dp.add_handler(CommandHandler("sonlink", get_latest_link_command))
         dp.add_handler(CommandHandler("yenilink", generate_new_link_command))
+        
+        # Botu ayrı bir thread'de başlatıyoruz ki Flask uygulamasını bloklamasın
         threading.Thread(target=updater.start_polling, daemon=True).start()
         print("Telegram botu başarıyla başlatıldı ve komutları dinliyor.")
