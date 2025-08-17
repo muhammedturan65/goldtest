@@ -1,0 +1,41 @@
+# render.yaml
+services:
+  - type: web
+    name: goldclub-manager
+    env: python
+    plan: starter # Ücretsiz plan, kaynak yetersiz kalırsa yükseltebilirsiniz
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT app:app"
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.6 # Kullandığınız Python sürümüne göre ayarlayın
+      - key: GCB_EMAIL
+        sync: false # Render dashboard'undan ayarlanacak
+      - key: GCB_PASSWORD
+        sync: false # Render dashboard'undan ayarlanacak
+      - key: NOTIF_ENABLED
+        value: "true"
+      - key: SMTP_SERVER
+        sync: false
+      - key: SMTP_PORT
+        value: 587
+      - key: SENDER_EMAIL
+        sync: false
+      - key: SENDER_PASSWORD
+        sync: false
+      - key: RECEIVER_EMAIL
+        sync: false
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: SCHEDULER_HOUR
+        value: 4
+      - key: SCHEDULER_MINUTE
+        value: 0
+      - key: SCHEDULER_TARGET_GROUP
+        value: "TURKISH"
+        
+    disks:
+      - name: goldclub-data
+        mountPath: /var/data/goldclub
+        sizeGB: 1

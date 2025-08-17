@@ -1,0 +1,9 @@
+# requirements.txt
+Flask
+Flask-SocketIO
+Flask-APScheduler
+requests
+selenium
+webdriver-manager
+gunicorn
+eventlet
