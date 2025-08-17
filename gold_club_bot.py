@@ -1,4 +1,4 @@
-# gold_club_bot.py (M3U Ayrıştırma ve Gelişmiş Loglama İçeren Final Versiyon)
+# gold_club_bot.py (Zaman Aşımı Düzeltilmiş ve Loglaması İyileştirilmiş Final Versiyon)
 
 import time
 import traceback
@@ -28,7 +28,6 @@ class GoldClubBot:
         log_message = f"SID {self.sid or 'Scheduler'}: {message}"
         print(log_message)
         if self.socketio and self.sid:
-            # Socket.IO'ya mesajın seviyesini de gönderiyoruz
             self.socketio.emit('status_update', {'message': message, 'level': level}, to=self.sid)
             self.socketio.sleep(0)
 
@@ -59,11 +58,14 @@ class GoldClubBot:
     def _parse_playlist(self, m3u_url):
         self._report_status(f"-> M3U içeriği indiriliyor ve '{self.target_group}' grubuna göre filtreleniyor...")
         try:
-            response = requests.get(m3u_url, timeout=20)
+            # Zaman aşımı süresini 20 saniyeden 60 saniyeye çıkarıyoruz.
+            response = requests.get(m3u_url, timeout=60)
             response.raise_for_status()
             content = response.text
             
-            # Regex ile kanalları bul ve belirtilen gruba göre (büyük/küçük harf duyarsız) filtrele
+            # İndirmenin başarılı olduğuna ve ayrıştırmanın başladığına dair yeni bir log ekliyoruz.
+            self._report_status(f"-> Playlist içeriği başarıyla indirildi ({len(content) / 1024:.2f} KB). Şimdi kanallar ayrıştırılıyor...")
+
             channels = [
                 {"name": name.strip(), "group": group.strip(), "url": url.strip()} 
                 for group, name, url in re.findall(r'#EXTINF:-1.*?group-title="(.*?)".*?,(.*?)\n(https?://.*)', content) 
@@ -76,7 +78,7 @@ class GoldClubBot:
 
             return channels
         except requests.RequestException as e:
-            self._report_status(f"[HATA] Playlist indirilemedi: {e}", level='error')
+            self._report_status(f"[HATA] Playlist içeriği indirilemedi. Sunucu yanıt vermiyor veya zaman aşımına uğradı. Hata: {e}", level='error')
             return None
 
     def _setup_driver(self):
@@ -129,7 +131,6 @@ class GoldClubBot:
         if not (m3u_link and expiry_date):
             raise Exception("M3U linki veya son kullanma tarihi alınamadı.")
         
-        # Linki aldıktan sonra ayrıştırma fonksiyonunu çağırıyoruz.
         channels = self._parse_playlist(m3u_link)
         
         self._report_status("-> Veri çekme ve ayrıştırma tamamlandı.")
