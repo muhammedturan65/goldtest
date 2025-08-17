@@ -1,15 +1,19 @@
-# render.yaml (Son Düzeltilmiş Versiyon)
+# render.yaml (Veritabanı Kullanan Final Versiyon)
 services:
   - type: web
     name: goldclub-manager
     env: python
-    plan: starter
+    plan: starter # Ücretsiz plan
     buildCommand: "./build.sh"
     startCommand: "gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT app:app"
     healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.6
+      # Veritabanı bağlantı adresi Render tarafından otomatik olarak bu değişkene atanacak.
+      - fromDatabase:
+          name: goldclub-db  # Aşağıda oluşturduğumuz veritabanının adı
+          property: connectionString
       - key: GCB_EMAIL
         sync: false
       - key: GCB_PASSWORD
@@ -34,11 +38,8 @@ services:
         value: 0
       - key: SCHEDULER_TARGET_GROUP
         value: "TURKISH"
-        
-    # --- DÜZELTME BURADA ---
-    # Anahtar kelime 'disks' (çoğul) yerine 'disk' (tekil) olmalı
-    # ve altındaki liste (-) işareti kaldırılmalı.
-    disk:
-      name: goldclub-data
-      mountPath: /var/data/goldclub
-      sizeGB: 1
+
+# Disk yerine ücretsiz bir PostgreSQL veritabanı oluşturuyoruz.
+databases:
+  - name: goldclub-db
+    plan: free # Veritabanı için ücretsiz plan
