@@ -1,12 +1,12 @@
 # requirements.txt
-Flask>=2.0
-Werkzeug>=2.0
+Flask
 Flask-SocketIO
 Flask-APScheduler
-Flask-SQLAlchemy
-psycopg2-binary
+requests
+selenium
+webdriver-manager
 gunicorn
 eventlet
-requests
-# YENİ EKLENDİ: HTML ayrıştırması için
-beautifulsoup4
+Flask-SQLAlchemy  # Veritabanı yönetimini kolaylaştırır
+psycopg2-binary   # Python'un PostgreSQL ile konuşmasını sağlar
+Werkzeug
