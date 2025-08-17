@@ -1,4 +1,4 @@
-# render.yaml (Veritabanı Kullanan Final Versiyon)
+# render.yaml (YAML Hatası Düzeltilmiş Final Versiyon)
 services:
   - type: web
     name: goldclub-manager
@@ -10,10 +10,14 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.6
-      # Veritabanı bağlantı adresi Render tarafından otomatik olarak bu değişkene atanacak.
-      - fromDatabase:
-          name: goldclub-db  # Aşağıda oluşturduğumuz veritabanının adı
+
+      # --- DÜZELTME BURADA ---
+      # 'fromDatabase' bloğuna hangi isimle (key) erişileceğini belirtmemiz gerekiyor.
+      - key: DATABASE_URL # app.py bu değişken adını arıyor.
+        fromDatabase:
+          name: goldclub-db # Aşağıda oluşturduğumuz veritabanının adı
           property: connectionString
+      
       - key: GCB_EMAIL
         sync: false
       - key: GCB_PASSWORD
@@ -39,7 +43,6 @@ services:
       - key: SCHEDULER_TARGET_GROUP
         value: "TURKISH"
 
-# Disk yerine ücretsiz bir PostgreSQL veritabanı oluşturuyoruz.
 databases:
   - name: goldclub-db
-    plan: free # Veritabanı için ücretsiz plan
+    plan: free
