@@ -1,4 +1,5 @@
-# app.py (Sadeleştirilmiş ve Anında Güncelleme Sorunu Düzeltilmiş Final Versiyon)
+# app.py (Tüm Düzeltmeleri İçeren Final Versiyon)
+
 import os
 import json
 import requests
@@ -23,7 +24,6 @@ from sqlalchemy import desc
 app = Flask(__name__)
 
 # Render'ın sağladığı DATABASE_URL ortam değişkenini kullanarak veritabanına bağlanıyoruz.
-# 'postgres://' ile başlayan URL'leri SQLAlchemy'nin beklediği 'postgresql://' formatına çeviriyoruz.
 database_uri = os.environ.get('DATABASE_URL', 'sqlite:///local_dev.db')
 if database_uri.startswith("postgres://"):
     database_uri = database_uri.replace("postgres://", "postgresql://", 1)
@@ -36,10 +36,9 @@ socketio = SocketIO(app, async_mode='eventlet')
 scheduler = APScheduler()
 
 # --- Veritabanı Modeli (Sadeleştirildi) ---
-# Artık kanal sayısı veya json içeriği tutmuyoruz. Sadece linkin kendisi var.
 class GeneratedLink(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    m3u_url = db.Column(db.Text, nullable=False) # TEXT olarak değiştirdik, linkler uzun olabilir
+    m3u_url = db.Column(db.Text, nullable=False)
     expiry_date = db.Column(db.String, nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
@@ -110,7 +109,7 @@ def scheduled_task():
         process_bot_run(target_group=target_group)
     print("Zamanlanmış görev tamamlandı.")
 
-# --- HTML TEMPLATE (Sadeleştirilmiş Arayüz ve Anında Güncelleme Düzeltmesi) ---
+# --- HTML TEMPLATE (Mobil Uyumlu Final Versiyon) ---
 HOME_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="tr">
@@ -140,7 +139,64 @@ HOME_TEMPLATE = """
         .m3u-cell { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
         .m3u-link { word-break: break-all; background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 4px; font-family: monospace; flex-grow: 1; }
         .btn-copy { background: none; border: 1px solid var(--border-color); color: var(--text-secondary); padding: 0.4rem 0.8rem; border-radius: 20px; cursor: pointer; flex-shrink: 0; }
-        @media (max-width: 992px) { .dashboard { grid-template-columns: 1fr; } }
+
+        /* --- MOBİL UYUMLULUK DÜZELTMESİ --- */
+        @media (max-width: 992px) { 
+            .dashboard { grid-template-columns: 1fr; } 
+            
+            .history-table thead {
+                border: none;
+                clip: rect(0 0 0 0);
+                height: 1px;
+                margin: -1px;
+                overflow: hidden;
+                padding: 0;
+                position: absolute;
+                width: 1px;
+            }
+            
+            .history-table tr {
+                display: block;
+                border-bottom: 2px solid var(--accent-grad);
+                margin-bottom: 1.5rem;
+                border-radius: 8px;
+                background: rgba(0,0,0,0.2);
+            }
+            
+            .history-table td {
+                display: block;
+                text-align: right;
+                border-bottom: 1px dotted rgba(255,255,255,0.1);
+                padding: 0.75rem;
+            }
+            .history-table td:last-child {
+                border-bottom: 0;
+            }
+            
+            .history-table td::before {
+                content: attr(data-label);
+                float: left;
+                font-weight: bold;
+                color: var(--text-secondary);
+                text-transform: uppercase;
+                font-size: 0.85em;
+            }
+
+            .m3u-cell {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+
+            .m3u-link {
+                width: 100%;
+                text-align: left;
+            }
+
+            .btn-copy {
+                align-self: flex-end;
+            }
+        }
     </style>
 </head>
 <body>
@@ -168,8 +224,6 @@ HOME_TEMPLATE = """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
     <script>
         feather.replace();
-        // --- OTOMATİK GÜNCELLEME SORUNUNUN ÇÖZÜMÜ BURADA ---
-        // Render'ın proxy'si ile uyumlu çalışması için 'websocket' transport'unu zorluyoruz.
         const socket = io({ transports: ['websocket'] });
 
         const startBtn = document.getElementById('start-btn');
@@ -177,13 +231,12 @@ HOME_TEMPLATE = """
         const historyBody = document.getElementById('history-body');
 
         function renderHistoryRow(item) {
-            // Butonun içindeki feather iconunu da içeren tam HTML'i oluştur
             const copyButtonHTML = `<button class="btn-copy" onclick="copyLink(this, \`${item.m3u_url}\`)"><i data-feather="copy"></i></button>`;
             
             return `<tr id="history-row-${item.id}">
-                <td>${new Date(item.created_at).toLocaleString('tr-TR')}</td>
-                <td>${item.expiry_date}</td>
-                <td class="m3u-cell">
+                <td data-label="Üretim Zamanı">${new Date(item.created_at).toLocaleString('tr-TR')}</td>
+                <td data-label="Son Kullanma">${item.expiry_date}</td>
+                <td data-label="M3U Linki" class="m3u-cell">
                     <div class="m3u-link">${item.m3u_url}</div>
                     ${copyButtonHTML}
                 </td>
@@ -198,7 +251,7 @@ HOME_TEMPLATE = """
                 historyData.forEach(item => { 
                     historyBody.innerHTML += renderHistoryRow(item);
                 });
-                feather.replace(); // Tüm ikonları yeniden çiz
+                feather.replace();
             } catch (e) { console.error(e); } 
         }
 
@@ -220,7 +273,6 @@ HOME_TEMPLATE = """
             startBtn.innerHTML = '<i data-feather="loader" class="spinner"></i><span>İşlem Yürütülüyor...</span>';
             feather.replace();
             logContainer.innerHTML = '';
-            // Artık target_group göndermiyoruz
             socket.emit('start_process', {});
         });
         
@@ -228,10 +280,9 @@ HOME_TEMPLATE = """
             startBtn.disabled = false;
             startBtn.innerHTML = '<i data-feather="play-circle"></i><span>Yeni M3U Linki Üret</span>';
             if (data.new_link) {
-                // Yeni satırı listenin başına ekle
                 historyBody.insertAdjacentHTML('afterbegin', renderHistoryRow(data.new_link));
             }
-            feather.replace(); // Yeni eklenen ikonları da çiz
+            feather.replace();
         });
 
         socket.on('status_update', (data) => {
@@ -265,8 +316,7 @@ def get_history():
 @socketio.on('start_process')
 def handle_start_process(data):
     sid = request.sid
-    # target_group artık kullanılmıyor
-    target_group = data.get('target_group', 'DEFAULT') # Varsayılan bir değer atayabiliriz
+    target_group = "DEFAULT" # Artık kullanılmıyor
     def background_task_wrapper(sid, target_group):
         with app.app_context():
             result = process_bot_run(target_group, sid)
