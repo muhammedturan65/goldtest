@@ -1,8 +1,7 @@
-# gold_club_bot.py (Zaman Aşımı Düzeltilmiş ve Loglaması İyileştirilmiş Final Versiyon)
+# gold_club_bot.py (Filtreleme Kaldırılmış, En Sade ve Hızlı Final Versiyon)
 
 import time
 import traceback
-import re
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -18,6 +17,7 @@ class GoldClubBot:
         self.password = password
         self.socketio = socketio
         self.sid = sid
+        # target_group artık kullanılmıyor ama uyumluluk için parametre olarak kalabilir.
         self.target_group = target_group
         self.driver = None
         self.wait = None
@@ -54,32 +54,6 @@ class GoldClubBot:
                     time.sleep(delay)
                 else:
                     raise
-    
-    def _parse_playlist(self, m3u_url):
-        self._report_status(f"-> M3U içeriği indiriliyor ve '{self.target_group}' grubuna göre filtreleniyor...")
-        try:
-            # Zaman aşımı süresini 20 saniyeden 60 saniyeye çıkarıyoruz.
-            response = requests.get(m3u_url, timeout=60)
-            response.raise_for_status()
-            content = response.text
-            
-            # İndirmenin başarılı olduğuna ve ayrıştırmanın başladığına dair yeni bir log ekliyoruz.
-            self._report_status(f"-> Playlist içeriği başarıyla indirildi ({len(content) / 1024:.2f} KB). Şimdi kanallar ayrıştırılıyor...")
-
-            channels = [
-                {"name": name.strip(), "group": group.strip(), "url": url.strip()} 
-                for group, name, url in re.findall(r'#EXTINF:-1.*?group-title="(.*?)".*?,(.*?)\n(https?://.*)', content) 
-                if self.target_group.lower() in group.lower()
-            ]
-            
-            self._report_status(f"-> Analiz tamamlandı: {len(channels)} adet '{self.target_group}' kanalı bulundu.")
-            if not channels:
-                self._report_status(f"[UYARI] '{self.target_group}' grubunda hiç kanal bulunamadı.", level='warning')
-
-            return channels
-        except requests.RequestException as e:
-            self._report_status(f"[HATA] Playlist içeriği indirilemedi. Sunucu yanıt vermiyor veya zaman aşımına uğradı. Hata: {e}", level='error')
-            return None
 
     def _setup_driver(self):
         self._report_status("-> WebDriver hazırlanıyor (arka plan modu)...")
@@ -131,10 +105,8 @@ class GoldClubBot:
         if not (m3u_link and expiry_date):
             raise Exception("M3U linki veya son kullanma tarihi alınamadı.")
         
-        channels = self._parse_playlist(m3u_link)
-        
-        self._report_status("-> Veri çekme ve ayrıştırma tamamlandı.")
-        return {"url": m3u_link, "expiry": expiry_date, "channels": channels}
+        self._report_status("-> M3U Linki başarıyla alındı.")
+        return {"url": m3u_link, "expiry": expiry_date}
     
     def _cleanup(self):
         if self.driver:
