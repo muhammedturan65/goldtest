@@ -1,10 +1,9 @@
-# app.py (Şifre Koruması Eklenmiş Final Versiyon)
+# app.py (Saat Dilimi Düzeltmesi Dahil Final Versiyon)
 
 import os
 import sys
 import smtplib
 from datetime import datetime
-# session, redirect, url_for ve flash yetkilendirme için eklendi
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, flash
 from flask_socketio import SocketIO
 from flask_apscheduler import APScheduler
@@ -22,7 +21,6 @@ if database_uri.startswith("postgres://"):
     database_uri = database_uri.replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_DATABASE_URI'] = database_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-# SECRET_KEY, session'ların güvenli bir şekilde şifrelenmesi için KRİTİKTİR.
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default-super-secret-key-for-local-dev')
 
 db = SQLAlchemy(app)
@@ -47,15 +45,12 @@ class GeneratedLink(db.Model):
 # --- Yapılandırma ---
 config = {}
 def load_config():
-    """Uygulama yapılandırmasını ortam değişkenlerinden yükler."""
     global config
     print("Yapılandırma ortam değişkenlerinden yükleniyor...")
-    # Uygulama şifresini oku
     config['app_password'] = os.environ.get('APP_PASSWORD')
     if not config['app_password']:
         print("KRİTİK HATA: 'APP_PASSWORD' ortam değişkeni ayarlanmamış.")
         sys.exit(1)
-        
     config['email'] = os.environ.get('GCB_EMAIL')
     config['password'] = os.environ.get('GCB_PASSWORD')
     if not config['email'] or not config['password']:
@@ -83,14 +78,9 @@ def process_bot_run(sid=None):
         error_message = result_data.get('error', 'Bilinmeyen bir hata oluştu veya link alınamadı.')
         send_email_notification("Link Oluşturma Başarısız Oldu", f"Hata: {error_message}")
         return {"error": error_message}
-
-    new_link = GeneratedLink(
-        m3u_url=result_data['url'],
-        expiry_date=result_data['expiry']
-    )
+    new_link = GeneratedLink(m3u_url=result_data['url'], expiry_date=result_data['expiry'])
     db.session.add(new_link)
     db.session.commit()
-    
     new_link_data = new_link.to_dict()
     subject = "Yeni M3U Linki Oluşturuldu"
     body = f"<p>Yeni bir M3U linki başarıyla oluşturuldu.</p><ul><li><b>Link:</b> {result_data['url']}</li><li><b>Son Kullanma:</b> {result_data['expiry']}</li></ul>"
@@ -264,6 +254,8 @@ HOME_TEMPLATE = """
             if (expiryDate < now) { rowClass = 'expired'; } 
             else if ((expiryDate - now) < oneDay) { rowClass = 'expiring'; }
 
+            // *** SAAT DİLİMİ DÜZELTMESİ BURADA ***
+            // Sunucudan gelen UTC tarihini (item.created_at) tarayıcının yerel saatine çevirip formatlıyoruz.
             const localCreationTime = new Date(item.created_at).toLocaleString('tr-TR', {
                 year: 'numeric', month: '2-digit', day: '2-digit',
                 hour: '2-digit', minute: '2-digit', second: '2-digit'
