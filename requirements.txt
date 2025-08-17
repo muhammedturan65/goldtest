@@ -1,4 +1,4 @@
-# requirements.txt (Uyumlu Sürümlerle Güncellendi)
+# requirements.txt
 Flask
 Flask-SocketIO
 Flask-APScheduler
@@ -7,7 +7,6 @@ selenium
 webdriver-manager
 gunicorn
 eventlet
-Flask-SQLAlchemy
-psycopg2-binary
-python-telegram-bot~=13.15
-httpx<0.20
+Flask-SQLAlchemy  # Veritabanı yönetimini kolaylaştırır
+psycopg2-binary   # Python'un PostgreSQL ile konuşmasını sağlar
+Werkzeug
