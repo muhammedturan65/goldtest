@@ -1,4 +1,4 @@
-# app.py (Telegram Bot Başlatma Hatası Düzeltilmiş Final Versiyon)
+# app.py (Telegram Kütüphane Sürüm Çakışması Düzeltilmiş Final Versiyon)
 
 import os
 import sys
@@ -15,9 +15,9 @@ from gold_club_bot import GoldClubBot
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
 
-# Telegram Bot kütüphanesinden modern ve doğru modüller import ediliyor
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, CallbackContext
+# Uyumlu (eski) kütüphane sürümü için gerekli importlar
+import telegram
+from telegram.ext import Updater, CommandHandler
 
 # --- Flask ve Veritabanı Kurulumu ---
 app = Flask(__name__)
@@ -73,10 +73,8 @@ def load_config():
 def send_telegram_message(message):
     if config.get('telegram_token') and config.get('telegram_chat_id'):
         try:
-            bot = Bot(token=config['telegram_token'])
-            # Botun asenkron fonksiyonunu çalıştırmak için bir event loop'a ihtiyacımız var.
-            import asyncio
-            asyncio.run(bot.send_message(chat_id=config['telegram_chat_id'], text=message, parse_mode='HTML'))
+            bot = telegram.Bot(token=config['telegram_token'])
+            bot.send_message(chat_id=config['telegram_chat_id'], text=message, parse_mode=telegram.ParseMode.HTML)
             print("Telegram mesajı başarıyla gönderildi.")
         except Exception as e:
             print(f"Telegram mesajı gönderilemedi: {e}")
@@ -351,11 +349,11 @@ HOME_TEMPLATE = """
 </html>
 """
 
-# --- TELEGRAM BOT KOMUTLARI (Modernize Edildi) ---
-async def start_command(update: Update, context: CallbackContext):
-    await update.message.reply_text('Merhaba! M3U Link Botuna hoş geldiniz. /yenilink veya /sonlink komutlarını kullanabilirsiniz.')
+# --- TELEGRAM BOT KOMUTLARI (Uyumlu Sürüme Geri Döndürüldü) ---
+def start_command(update, context):
+    update.message.reply_text('Merhaba! M3U Link Botuna hoş geldiniz. /yenilink veya /sonlink komutlarını kullanabilirsiniz.')
 
-async def get_latest_link_command(update: Update, context: CallbackContext):
+def get_latest_link_command(update, context):
     with app.app_context():
         last_link = GeneratedLink.query.order_by(desc(GeneratedLink.id)).first()
         if last_link:
@@ -364,12 +362,12 @@ async def get_latest_link_command(update: Update, context: CallbackContext):
                        f"<b>Üretim Zamanı (TSİ):</b> {local_creation_time.strftime('%d.%m.%Y %H:%M:%S')}\n"
                        f"<b>Son Kullanma:</b> {last_link.expiry_date}\n\n"
                        f"<code>{last_link.m3u_url}</code>")
-            await update.message.reply_html(message)
+            update.message.reply_html(message)
         else:
-            await update.message.reply_text('Veritabanında henüz kayıtlı bir link bulunmuyor.')
+            update.message.reply_text('Veritabanında henüz kayıtlı bir link bulunmuyor.')
 
-async def generate_new_link_command(update: Update, context: CallbackContext):
-    await update.message.reply_text('Yeni link üretme işlemi başlatıldı... Bu işlem 1-2 dakika sürebilir. Sonuç size mesaj olarak gönderilecektir.')
+def generate_new_link_command(update, context):
+    update.message.reply_text('Yeni link üretme işlemi başlatıldı... Bu işlem 1-2 dakika sürebilir. Sonuç size mesaj olarak gönderilecektir.')
     threading.Thread(target=run_process_for_telegram).start()
 
 def run_process_for_telegram():
@@ -430,11 +428,14 @@ with app.app_context():
          scheduler.add_job(id='cleanup_task', func=cleanup_expired_links, trigger='cron', hour=5, minute=0)
          print("Zamanlanmış veritabanı temizlik görevi kuruldu: Her gün saat 05:00 (UTC)")
 
+    # TELEGRAM BOTUNU BAŞLATMA (Uyumlu Sürüm Yapısı)
     if config.get('telegram_token'):
-        print("Telegram botu başlatılıyor...")
-        application = Application.builder().token(config['telegram_token']).build()
-        application.add_handler(CommandHandler("start", start_command))
-        application.add_handler(CommandHandler("sonlink", get_latest_link_command))
-        application.add_handler(CommandHandler("yenilink", generate_new_link_command))
-        threading.Thread(target=application.run_polling, daemon=True).start()
+        print("Telegram botu başlatılıyor (uyumlu mod)...")
+        updater = Updater(config['telegram_token'], use_context=True)
+        dp = updater.dispatcher
+        dp.add_handler(CommandHandler("start", start_command))
+        dp.add_handler(CommandHandler("sonlink", get_latest_link_command))
+        dp.add_handler(CommandHandler("yenilink", generate_new_link_command))
+        
+        threading.Thread(target=updater.start_polling, daemon=True).start()
         print("Telegram botu başarıyla başlatıldı ve komutları dinliyor.")
