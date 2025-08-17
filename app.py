@@ -1,6 +1,5 @@
-# app.py
+# app.py (PostgreSQL ve SQLAlchemy kullanan Final Versiyon)
 import os
-import sqlite3
 import json
 import requests
 import sys
@@ -16,100 +15,118 @@ from email.mime.base import MIMEBase
 from email import encoders
 from gold_club_bot import GoldClubBot
 
-# --- Ayarlar ve Konfigürasyon ---
-# Render.com'un Kalıcı Diski (Persistent Disk) için yol tanımlaması.
-# Ortam değişkeni yoksa, yerel geliştirme için mevcut dizini kullanır.
-DATA_DIR = os.environ.get('RENDER_DISK_MOUNT_PATH', '.')
-DATABASE = os.path.join(DATA_DIR, 'goldclub_data.db')
-PLAYLISTS_DIR = os.path.join(DATA_DIR, 'playlists')
+# Veritabanı yönetimi için SQLAlchemy'yi ekliyoruz
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import desc
 
-# Yapılandırma artık config.json yerine ortam değişkenlerinden okunacak.
-config = {}
-
-def load_or_create_config():
-    """
-    Uygulama yapılandırmasını ortam değişkenlerinden yükler.
-    Bu yöntem, hassas verilerin kod içinde tutulmasını engeller.
-    """
-    global config
-    print("Yapılandırma ortam değişkenlerinden yükleniyor...")
-
-    # Bot kimlik bilgileri
-    config['email'] = os.environ.get('GCB_EMAIL')
-    config['password'] = os.environ.get('GCB_PASSWORD')
-
-    if not config['email'] or not config['password']:
-        print("KRİTİK HATA: 'GCB_EMAIL' ve 'GCB_PASSWORD' ortam değişkenleri ayarlanmamış.")
-        sys.exit(1)
-
-    # Zamanlayıcı ayarları
-    config['scheduler'] = {
-        "enabled": os.environ.get('SCHEDULER_ENABLED', 'false').lower() == 'true',
-        "hour": int(os.environ.get('SCHEDULER_HOUR', 4)),
-        "minute": int(os.environ.get('SCHEDULER_MINUTE', 0)),
-        "target_group": os.environ.get('SCHEDULER_TARGET_GROUP', 'TURKISH')
-    }
-
-    # E-posta bildirim ayarları
-    config['notification'] = {
-        "enabled": os.environ.get('NOTIF_ENABLED', 'false').lower() == 'true',
-        "smtp_server": os.environ.get('SMTP_SERVER'),
-        "smtp_port": int(os.environ.get('SMTP_PORT', 587)),
-        "sender_email": os.environ.get('SENDER_EMAIL'),
-        "sender_password": os.environ.get('SENDER_PASSWORD'),
-        "receiver_email": os.environ.get('RECEIVER_EMAIL')
-    }
-    print("Yapılandırma başarıyla yüklendi.")
-
-def send_email_notification(subject, body, attachment_content=None, attachment_filename=None):
-    notif_config = config.get('notification', {})
-    if not notif_config.get('enabled'): return
-    try:
-        msg = MIMEMultipart(); msg['From'] = notif_config['sender_email']; msg['To'] = notif_config['receiver_email']; msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'html'))
-
-        if attachment_content and attachment_filename:
-            part = MIMEBase('application', 'octet-stream')
-            part.set_payload(attachment_content.encode('utf-8'))
-            encoders.encode_base64(part)
-            part.add_header('Content-Disposition', f'attachment; filename="{attachment_filename}"')
-            msg.attach(part)
-            print(f"E-postaya ek ekleniyor: {attachment_filename}")
-
-        server = smtplib.SMTP(notif_config['smtp_server'], notif_config['smtp_port']); server.starttls(); server.login(notif_config['sender_email'], notif_config['sender_password'])
-        server.send_message(msg); server.quit()
-        print(f"Bildirim e-postası başarıyla gönderildi: '{subject}'")
-    except Exception as e: print(f"E-posta gönderilemedi: {e}")
-
-def get_db_connection(): conn = sqlite3.connect(DATABASE, check_same_thread=False); conn.row_factory = sqlite3.Row; return conn
-
-def init_app():
-    # Uygulama başladığında veritabanı ve klasörlerin varlığını kontrol et
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-        print(f"Veri dizini oluşturuldu: {DATA_DIR}")
-
-    if not os.path.exists(DATABASE):
-        print(f"Veritabanı '{DATABASE}' oluşturuluyor...");
-        conn = get_db_connection();
-        conn.execute("CREATE TABLE generated_links (id INTEGER PRIMARY KEY, m3u_url TEXT NOT NULL, expiry_date TEXT NOT NULL, channel_count INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);");
-        conn.commit();
-        conn.close()
-    if not os.path.exists(PLAYLISTS_DIR):
-        os.makedirs(PLAYLISTS_DIR)
-        print(f"Playlist dizini oluşturuldu: {PLAYLISTS_DIR}")
-
-
-# Flask uygulaması ve SocketIO kurulumu
-# SECRET_KEY de güvenlik için ortam değişkenlerinden alınır.
+# --- Flask ve Veritabanı Kurulumu ---
 app = Flask(__name__)
+
+# Render'ın sağladığı DATABASE_URL ortam değişkenini kullanarak veritabanına bağlanıyoruz.
+# 'postgres://' ile başlayan URL'leri SQLAlchemy'nin beklediği 'postgresql://' formatına çeviriyoruz.
+database_uri = os.environ.get('DATABASE_URL', 'sqlite:///local_dev.db')
+if database_uri.startswith("postgres://"):
+    database_uri = database_uri.replace("postgres://", "postgresql://", 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = database_uri
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default-super-secret-key-for-local-dev')
+
+db = SQLAlchemy(app)
 socketio = SocketIO(app, async_mode='eventlet')
 scheduler = APScheduler()
 
+# --- Veritabanı Modeli (Tablo Tanımı) ---
+# SQLite'taki 'generated_links' tablosunu bir Python sınıfı olarak tanımlıyoruz.
+# Playlist JSON içeriğini saklamak için yeni bir sütun ekledik.
+class GeneratedLink(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    m3u_url = db.Column(db.String, nullable=False)
+    expiry_date = db.Column(db.String, nullable=False)
+    channel_count = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    # Playlist kanallarını içeren JSON verisini metin olarak saklayacak sütun.
+    channels_json = db.Column(db.Text, nullable=True)
+
+    def to_dict(self):
+        # Nesneyi kolayca JSON'a çevrilebilir bir sözlüğe dönüştürür.
+        return {
+            'id': self.id,
+            'm3u_url': self.m3u_url,
+            'expiry_date': self.expiry_date,
+            'channel_count': self.channel_count,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+# --- Yapılandırma ---
+config = {}
+def load_config():
+    """Uygulama yapılandırmasını ortam değişkenlerinden yükler."""
+    global config
+    print("Yapılandırma ortam değişkenlerinden yükleniyor...")
+    config['email'] = os.environ.get('GCB_EMAIL')
+    config['password'] = os.environ.get('GCB_PASSWORD')
+    if not config['email'] or not config['password']:
+        print("KRİTİK HATA: 'GCB_EMAIL' ve 'GCB_PASSWORD' ortam değişkenleri ayarlanmamış.")
+        sys.exit(1)
+    config['scheduler'] = {"enabled": os.environ.get('SCHEDULER_ENABLED', 'false').lower() == 'true', "hour": int(os.environ.get('SCHEDULER_HOUR', 4)), "minute": int(os.environ.get('SCHEDULER_MINUTE', 0)), "target_group": os.environ.get('SCHEDULER_TARGET_GROUP', 'TURKISH')}
+    config['notification'] = {"enabled": os.environ.get('NOTIF_ENABLED', 'false').lower() == 'true', "smtp_server": os.environ.get('SMTP_SERVER'), "smtp_port": int(os.environ.get('SMTP_PORT', 587)), "sender_email": os.environ.get('SENDER_EMAIL'), "sender_password": os.environ.get('SENDER_PASSWORD'), "receiver_email": os.environ.get('RECEIVER_EMAIL')}
+    print("Yapılandırma başarıyla yüklendi.")
+
+# --- E-posta Fonksiyonu ---
+def send_email_notification(subject, body, attachment_content=None, attachment_filename=None):
+    notif_config = config.get('notification', {})
+    if not notif_config.get('enabled') or not notif_config.get('sender_email'): return
+    try:
+        msg = MIMEMultipart(); msg['From'] = notif_config['sender_email']; msg['To'] = notif_config['receiver_email']; msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'html'))
+        if attachment_content and attachment_filename:
+            part = MIMEBase('application', 'octet-stream'); part.set_payload(attachment_content.encode('utf-8')); encoders.encode_base64(part); part.add_header('Content-Disposition', f'attachment; filename="{attachment_filename}"'); msg.attach(part)
+        server = smtplib.SMTP(notif_config['smtp_server'], notif_config['smtp_port']); server.starttls(); server.login(notif_config['sender_email'], notif_config['sender_password']); server.send_message(msg); server.quit()
+        print(f"Bildirim e-postası başarıyla gönderildi: '{subject}'")
+    except Exception as e: print(f"E-posta gönderilemedi: {e}")
+
+# --- BOT İŞLEMCİ FONKSİYONU (Veritabanı işlemleri güncellendi) ---
+def process_bot_run(target_group, sid=None):
+    result_data = GoldClubBot(email=config['email'], password=config['password'], socketio=socketio, sid=sid, target_group=target_group).run_full_process()
+    if "error" in result_data or not result_data.get('channels'):
+        error_message = result_data.get('error', 'Bilinmeyen bir hata oluştu veya hiç kanal bulunamadı.')
+        send_email_notification("Playlist Oluşturma Başarısız Oldu", f"Hata: {error_message}")
+        return {"error": error_message}
+
+    channel_count = len(result_data['channels'])
+    
+    # Yeni linki SQLAlchemy ile veritabanına ekliyoruz.
+    new_link = GeneratedLink(
+        m3u_url=result_data['url'],
+        expiry_date=result_data['expiry'],
+        channel_count=channel_count,
+        # JSON verisini dosyaya yazmak yerine doğrudan veritabanına kaydediyoruz.
+        channels_json=json.dumps(result_data['channels'], ensure_ascii=False, indent=4)
+    )
+    db.session.add(new_link)
+    db.session.commit()
+    
+    new_link_data = new_link.to_dict()
+
+    filtered_m3u_content = "#EXTM3U\n"
+    for ch in result_data['channels']:
+        filtered_m3u_content += f'#EXTINF:-1 group-title="{ch["group"]}",{ch["name"]}\n{ch["url"]}\n'
+    subject = f"Yeni Playlist Oluşturuldu ({channel_count} Kanal)"
+    body = f"<p>Yeni bir playlist başarıyla oluşturuldu.</p><ul><li><b>Kanal Sayısı:</b> {channel_count}</li><li><b>Son Kullanma:</b> {result_data['expiry']}</li></ul>"
+    m3u_filename = f"playlist_{new_link.id}_{time.strftime('%Y%m%d')}.m3u"
+    send_email_notification(subject, body, filtered_m3u_content, m3u_filename)
+
+    return {"new_link": new_link_data}
+
+# --- Zamanlanmış Görev ---
+def scheduled_task():
+    print("Zamanlanmış görev başlatılıyor...");
+    with app.app_context(): # Veritabanı işlemleri için uygulama bağlamı gerekli.
+        target_group = config.get('scheduler', {}).get('target_group', 'TURKISH')
+        process_bot_run(target_group=target_group)
+    print("Zamanlanmış görev tamamlandı.")
 
 # --- HTML TEMPLATE'LER ---
-# Bu bölümlerde herhangi bir değişiklik yapılmasına gerek yoktur.
 HOME_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="tr">
@@ -187,7 +204,7 @@ HOME_TEMPLATE = """
                  return;
             }
             document.getElementById('stat-total').textContent = historyData.length;
-            const totalChannels = historyData.reduce((sum, item) => sum + item.channel_count, 0);
+            const totalChannels = historyData.reduce((sum, item) => sum + (item.channel_count || 0), 0);
             document.getElementById('stat-avg-channels').textContent = historyData.length > 0 ? Math.round(totalChannels / historyData.length) : 0;
             document.getElementById('stat-last-run').textContent = new Date(historyData[0].created_at).toLocaleString('tr-TR');
         }
@@ -527,81 +544,39 @@ PLAYER_PAGE_HTML = """
 </html>
 """
 
-# --- BOT İŞLEMCİ FONKSİYONU ---
-def process_bot_run(target_group, sid=None):
-    result_data = GoldClubBot(email=config['email'], password=config['password'], socketio=socketio, sid=sid, target_group=target_group).run_full_process()
-    if "error" in result_data or not result_data.get('channels'):
-        error_message = result_data.get('error', 'Bilinmeyen bir hata oluştu veya hiç kanal bulunamadı.')
-        subject = "Playlist Oluşturma Başarısız Oldu"
-        body = f"<html><body>Playlist oluşturma işlemi sırasında bir hata meydana geldi.<br><br><b>Hata Detayı:</b> {error_message}</body></html>"
-        send_email_notification(subject, body)
-        return {"error": error_message}
-    conn = get_db_connection(); cursor = conn.cursor()
-    channel_count = len(result_data['channels'])
-    cursor.execute('INSERT INTO generated_links (m3u_url, expiry_date, channel_count) VALUES (?, ?, ?)', (result_data['url'], result_data['expiry'], channel_count))
-    new_id = cursor.lastrowid; conn.commit()
-    new_link_raw = conn.execute('SELECT * FROM generated_links WHERE id = ?', (new_id,)).fetchone(); conn.close()
-    new_link_data = dict(new_link_raw)
-    with open(os.path.join(PLAYLISTS_DIR, f"{new_id}.json"), 'w', encoding='utf-8') as f:
-        json.dump(result_data['channels'], f, ensure_ascii=False, indent=4)
-    filtered_m3u_content = "#EXTM3U\n"
-    for ch in result_data['channels']:
-        filtered_m3u_content += f'#EXTINF:-1 group-title="{ch["group"]}",{ch["name"]}\n{ch["url"]}\n'
-    subject = f"Yeni Playlist Oluşturuldu ({channel_count} Kanal)"
-    body = f"""
-    <html><body>
-    <p>Yeni bir playlist başarıyla oluşturuldu ve e-posta ekinde gönderildi.</p>
-    <ul>
-        <li><b>Kanal Sayısı:</b> {channel_count}</li>
-        <li><b>Son Kullanma:</b> {result_data['expiry']}</li>
-        <li><b>Filtre Grubu:</b> {target_group}</li>
-    </ul>
-    </body></html>
-    """
-    m3u_filename = f"playlist_{new_id}_{time.strftime('%Y%m%d')}.m3u"
-    send_email_notification(subject, body, filtered_m3u_content, m3u_filename)
-    return {"new_link": new_link_data}
-
-# --- ZAMANLANMIŞ GÖREV ---
-def scheduled_task():
-    print("Zamanlanmış görev başlatılıyor...");
-    target_group = config.get('scheduler', {}).get('target_group', 'TURKISH')
-    process_bot_run(target_group=target_group)
-    print("Zamanlanmış görev tamamlandı.")
-
-# --- Flask Yolları ve SocketIO Olayları ---
+# --- Flask Rotaları (Veritabanı işlemleri güncellendi) ---
 @app.route('/')
 def index(): return render_template_string(HOME_TEMPLATE)
 
 @app.route('/play')
-def play_stream():
-    encoded_url = request.args.get('url')
-    encoded_name = request.args.get('name')
-    if not encoded_url:
-        return "Hata: Oynatılacak URL belirtilmedi.", 400
-    # PLAYER_PAGE_HTML içindeki script'ler parametreleri kendi alıyor.
-    return render_template_string(PLAYER_PAGE_HTML)
+def play_stream(): return render_template_string(PLAYER_PAGE_HTML)
 
 @app.route('/playlist/<int:link_id>')
 def playlist_details(link_id):
-    playlist_path = os.path.join(PLAYLISTS_DIR, f"{link_id}.json");
-    if not os.path.exists(playlist_path): return "Playlist bulunamadı.", 404
-    with open(playlist_path, 'r', encoding='utf-8') as f: channels = json.load(f)
+    # Playlist'i dosyadan okumak yerine veritabanından çekiyoruz.
+    link = GeneratedLink.query.get(link_id)
+    if not link or not link.channels_json:
+        return "Playlist bulunamadı veya içeriği boş.", 404
+    
+    # Veritabanındaki JSON metnini Python listesine çeviriyoruz.
+    channels = json.loads(link.channels_json)
     return render_template_string(PLAYLIST_DETAILS_HTML, channels=channels, link_id=link_id)
 
 @app.route('/get_history')
 def get_history():
-    conn = get_db_connection(); links = conn.execute('SELECT * FROM generated_links ORDER BY id DESC LIMIT 20').fetchall(); conn.close()
-    return jsonify([dict(link) for link in links])
+    # Geçmişi SQLAlchemy ile çekiyoruz.
+    links = GeneratedLink.query.order_by(desc(GeneratedLink.id)).limit(20).all()
+    return jsonify([link.to_dict() for link in links])
 
 @app.route('/delete_playlist/<int:link_id>', methods=['POST'])
 def delete_playlist(link_id):
-    try:
-        conn = get_db_connection(); conn.execute('DELETE FROM generated_links WHERE id = ?', (link_id,)); conn.commit(); conn.close()
-        playlist_path = os.path.join(PLAYLISTS_DIR, f"{link_id}.json")
-        if os.path.exists(playlist_path): os.remove(playlist_path)
+    # Kaydı SQLAlchemy ile siliyoruz.
+    link = GeneratedLink.query.get(link_id)
+    if link:
+        db.session.delete(link)
+        db.session.commit()
         return jsonify({"success": True}), 200
-    except Exception as e: return jsonify({"success": False, "message": str(e)}), 500
+    return jsonify({"success": False, "message": "Link not found"}), 404
 
 @app.route('/generate_custom_playlist', methods=['POST'])
 def generate_custom_playlist():
@@ -609,31 +584,28 @@ def generate_custom_playlist():
     for ch in channels: content += f'#EXTINF:-1 group-title="{ch["group"]}",{ch["name"]}\n{ch["url"]}\n'
     return Response(content, mimetype="audio/x-mpegurl", headers={"Content-disposition": "attachment; filename=custom_playlist.m3u"})
 
+# --- SocketIO Olayları ---
 @socketio.on('start_process')
 def handle_start_process(data):
-    sid = request.sid
-    target_group = data.get('target_group', 'TURKISH')
+    sid = request.sid; target_group = data.get('target_group', 'TURKISH')
     def background_task_wrapper(sid, target_group):
-        result = process_bot_run(target_group, sid)
-        if "error" in result:
-            socketio.emit('process_error', {'error': result['error']}, to=sid)
-        else:
-            socketio.emit('process_complete', {'new_link': result['new_link']}, to=sid)
+        with app.app_context(): # Veritabanı işlemleri için uygulama bağlamı gerekli.
+            result = process_bot_run(target_group, sid)
+        if "error" in result: socketio.emit('process_error', {'error': result['error']}, to=sid)
+        else: socketio.emit('process_complete', {'new_link': result['new_link']}, to=sid)
     socketio.start_background_task(background_task_wrapper, sid, target_group)
 
 # --- Uygulama Başlatma ---
-# Bu blok, doğrudan 'python app.py' çalıştırıldığında değil,
-# Gunicorn gibi bir WSGI sunucusu tarafından çağrıldığında da çalışacak şekilde ayarlanır.
-load_or_create_config()
-init_app()
-scheduler_config = config.get('scheduler', {})
-if scheduler_config.get('enabled'):
-    scheduler.init_app(app)
-    scheduler.add_job(id='scheduled_bot_task', func=scheduled_task, trigger='cron', hour=scheduler_config.get('hour', 4), minute=scheduler_config.get('minute', 0))
-    scheduler.start()
-    print(f"Zamanlanmış görev kuruldu: Her gün saat {scheduler_config.get('hour', 4):02d}:{scheduler_config.get('minute', 0):02d}")
-
-# if __name__ == '__main__': bloğu kaldırıldı.
-# Gunicorn, 'app' adlı Flask nesnesini doğrudan bulup çalıştıracaktır.
-# Yerel geliştirme için, terminalde 'gunicorn --worker-class eventlet -w 1 app:app' komutunu kullanabilirsiniz.
-print("Uygulama sunucu tarafından başlatılmaya hazır.")
+# Bu kod bloğu, Gunicorn sunucusu uygulamayı başlattığında çalışır.
+with app.app_context():
+    load_config()
+    db.create_all() # Veritabanı tablolarının var olduğundan emin olur, yoksa oluşturur.
+    
+    scheduler_config = config.get('scheduler', {})
+    if scheduler_config.get('enabled'):
+        scheduler.init_app(app)
+        scheduler.start()
+        # Sunucu yeniden başlasa bile görevin tekrar eklenmesini önler.
+        if not scheduler.get_job('scheduled_bot_task'):
+             scheduler.add_job(id='scheduled_bot_task', func=scheduled_task, trigger='cron', hour=scheduler_config.get('hour', 4), minute=scheduler_config.get('minute', 0))
+             print(f"Zamanlanmış görev kuruldu: Her gün saat {scheduler_config.get('hour', 4):02d}:{scheduler_config.get('minute', 0):02d}")
