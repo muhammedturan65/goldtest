@@ -1,4 +1,4 @@
-# app.py (Akıllı Zamanlayıcı ve Telegram Bot Entegrasyonlu Final Versiyon)
+# app.py (Telegram Bot Başlatma Hatası Düzeltilmiş Final Versiyon)
 
 import os
 import sys
@@ -15,9 +15,9 @@ from gold_club_bot import GoldClubBot
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
 
-# YENİ EKLENDİ: Telegram Bot Kütüphanesi
-import telegram
-from telegram.ext import Updater, CommandHandler
+# Telegram Bot kütüphanesinden modern ve doğru modüller import ediliyor
+from telegram import Update, Bot
+from telegram.ext import Application, CommandHandler, CallbackContext
 
 # --- Flask ve Veritabanı Kurulumu ---
 app = Flask(__name__)
@@ -52,17 +52,14 @@ config = {}
 def load_config():
     global config
     print("Yapılandırma ortam değişkenlerinden yükleniyor...")
-    # Telegram bilgilerini oku
     config['telegram_token'] = os.environ.get('TELEGRAM_BOT_TOKEN')
     config['telegram_chat_id'] = os.environ.get('TELEGRAM_CHAT_ID')
     if not config['telegram_token'] or not config['telegram_chat_id']:
         print("[UYARI] Telegram bot token veya chat ID bulunamadı. Telegram özellikleri devre dışı kalacak.")
-    
     config['app_password'] = os.environ.get('APP_PASSWORD')
     if not config['app_password']:
         print("KRİTİK HATA: 'APP_PASSWORD' ortam değişkeni ayarlanmamış.")
         sys.exit(1)
-        
     config['email'] = os.environ.get('GCB_EMAIL')
     config['password'] = os.environ.get('GCB_PASSWORD')
     if not config['email'] or not config['password']:
@@ -76,8 +73,10 @@ def load_config():
 def send_telegram_message(message):
     if config.get('telegram_token') and config.get('telegram_chat_id'):
         try:
-            bot = telegram.Bot(token=config['telegram_token'])
-            bot.send_message(chat_id=config['telegram_chat_id'], text=message, parse_mode=telegram.ParseMode.HTML)
+            bot = Bot(token=config['telegram_token'])
+            # Botun asenkron fonksiyonunu çalıştırmak için bir event loop'a ihtiyacımız var.
+            import asyncio
+            asyncio.run(bot.send_message(chat_id=config['telegram_chat_id'], text=message, parse_mode='HTML'))
             print("Telegram mesajı başarıyla gönderildi.")
         except Exception as e:
             print(f"Telegram mesajı gönderilemedi: {e}")
@@ -97,25 +96,22 @@ def process_bot_run(sid=None, source="Bilinmiyor"):
     result_data = GoldClubBot(email=config['email'], password=config['password'], socketio=socketio, sid=sid).run_full_process()
     if "error" in result_data or not result_data.get('url'):
         error_message = result_data.get('error', 'Bilinmeyen bir hata oluştu veya link alınamadı.')
-        notification_subject = "Link Oluşturma Başarısız Oldu"
-        notification_body_html = f"<b>Kaynak:</b> {source}<br><b>Hata:</b> {error_message}"
-        notification_body_text = f"Link Oluşturma Başarısız Oldu\nKaynak: {source}\nHata: {error_message}"
-        send_email_notification(notification_subject, notification_body_html)
-        send_telegram_message(notification_body_text)
+        subject = "Link Oluşturma Başarısız Oldu"
+        body_html = f"<b>Kaynak:</b> {source}<br><b>Hata:</b> {error_message}"
+        send_email_notification(subject, body_html)
+        send_telegram_message(body_html)
         return {"error": error_message}
-
     new_link = GeneratedLink(m3u_url=result_data['url'], expiry_date=result_data['expiry'])
     db.session.add(new_link)
     db.session.commit()
     new_link_data = new_link.to_dict()
-
     subject = "Yeni M3U Linki Oluşturuldu"
     body_html = f"<b>Kaynak:</b> {source}<br><p>Yeni bir M3U linki başarıyla oluşturuldu.</p><ul><li><b>Link:</b> <code>{result_data['url']}</code></li><li><b>Son Kullanma:</b> {result_data['expiry']}</li></ul>"
     send_email_notification(subject, body_html)
     send_telegram_message(body_html)
     return {"new_link": new_link_data}
 
-# --- ZAMANLANMIŞ GÖREVLER (AKILLI ZAMANLAYICI) ---
+# --- ZAMANLANMIŞ GÖREVLER ---
 def smart_scheduler_task():
     print("Akıllı zamanlayıcı kontrolü başlatılıyor...");
     with app.app_context():
@@ -286,7 +282,6 @@ HOME_TEMPLATE = """
         const startBtn = document.getElementById('start-btn');
         const logContainer = document.getElementById('log-container');
         const historyBody = document.getElementById('history-body');
-
         function renderHistoryRow(item) {
             const expiryDate = new Date(item.expiry_date.replace(/,/, ''));
             const now = new Date();
@@ -294,7 +289,6 @@ HOME_TEMPLATE = """
             let rowClass = '';
             if (expiryDate < now) { rowClass = 'expired'; } 
             else if ((expiryDate - now) < oneDay) { rowClass = 'expiring'; }
-
             const localCreationTime = new Date(item.created_at).toLocaleString('tr-TR', {
                 year: 'numeric', month: '2-digit', day: '2-digit',
                 hour: '2-digit', minute: '2-digit', second: '2-digit'
@@ -309,7 +303,6 @@ HOME_TEMPLATE = """
                 </td>
             </tr>`;
         }
-
         async function fetchHistory() { 
             try { 
                 const res = await fetch('/get_history?t=' + new Date().getTime());
@@ -319,13 +312,11 @@ HOME_TEMPLATE = """
                 feather.replace();
             } catch (e) { console.error(e); } 
         }
-
         function copyLink(button, textToCopy) {
             navigator.clipboard.writeText(textToCopy).then(() => {
                 Toastify({ text: "Link panoya kopyalandı!", duration: 3000, gravity: "bottom", position: "right", style: { background: "var(--success-color)" } }).showToast();
             });
         }
-
         document.getElementById('control-form').addEventListener('submit', (e) => {
             e.preventDefault();
             startBtn.disabled = true;
@@ -334,7 +325,6 @@ HOME_TEMPLATE = """
             logContainer.innerHTML = '';
             socket.emit('start_process', {});
         });
-        
         socket.on('process_complete', (data) => {
             startBtn.disabled = false;
             startBtn.innerHTML = '<i data-feather="play-circle"></i><span>Yeni M3U Linki Üret</span>';
@@ -344,31 +334,28 @@ HOME_TEMPLATE = """
             feather.replace();
             Toastify({ text: "Yeni link başarıyla üretildi!", duration: 4000, gravity: "bottom", position: "right", style: { background: "var(--accent-grad)" } }).showToast();
         });
-
         socket.on('status_update', (data) => {
             const level = data.level || 'info';
             logContainer.innerHTML += `<div class="log-line ${level}">${data.message.replace(/</g, "&lt;")}</div>`;
             logContainer.scrollTop = logContainer.scrollHeight;
         });
-
         socket.on('process_error', (data) => {
             logContainer.innerHTML += `<div class="log-line error">HATA: ${data.error.replace(/</g, "&lt;")}</div>`;
             startBtn.disabled = false;
             startBtn.innerHTML = '<i data-feather="alert-triangle"></i><span>Tekrar Dene</span>';
             feather.replace();
         });
-        
         document.addEventListener('DOMContentLoaded', fetchHistory);
     </script>
 </body>
 </html>
 """
 
-# --- TELEGRAM BOT KOMUTLARI ---
-def start_command(update, context):
-    update.message.reply_text('Merhaba! M3U Link Botuna hoş geldiniz. /yenilink veya /sonlink komutlarını kullanabilirsiniz.')
+# --- TELEGRAM BOT KOMUTLARI (Modernize Edildi) ---
+async def start_command(update: Update, context: CallbackContext):
+    await update.message.reply_text('Merhaba! M3U Link Botuna hoş geldiniz. /yenilink veya /sonlink komutlarını kullanabilirsiniz.')
 
-def get_latest_link_command(update, context):
+async def get_latest_link_command(update: Update, context: CallbackContext):
     with app.app_context():
         last_link = GeneratedLink.query.order_by(desc(GeneratedLink.id)).first()
         if last_link:
@@ -377,12 +364,12 @@ def get_latest_link_command(update, context):
                        f"<b>Üretim Zamanı (TSİ):</b> {local_creation_time.strftime('%d.%m.%Y %H:%M:%S')}\n"
                        f"<b>Son Kullanma:</b> {last_link.expiry_date}\n\n"
                        f"<code>{last_link.m3u_url}</code>")
-            update.message.reply_html(message)
+            await update.message.reply_html(message)
         else:
-            update.message.reply_text('Veritabanında henüz kayıtlı bir link bulunmuyor.')
+            await update.message.reply_text('Veritabanında henüz kayıtlı bir link bulunmuyor.')
 
-def generate_new_link_command(update, context):
-    update.message.reply_text('Yeni link üretme işlemi başlatıldı... Bu işlem 1-2 dakika sürebilir. Sonuç size mesaj olarak gönderilecektir.')
+async def generate_new_link_command(update: Update, context: CallbackContext):
+    await update.message.reply_text('Yeni link üretme işlemi başlatıldı... Bu işlem 1-2 dakika sürebilir. Sonuç size mesaj olarak gönderilecektir.')
     threading.Thread(target=run_process_for_telegram).start()
 
 def run_process_for_telegram():
@@ -427,7 +414,7 @@ def handle_start_process(data):
         else: socketio.emit('process_complete', {'new_link': result['new_link']}, to=sid)
     socketio.start_background_task(background_task_wrapper, sid)
 
-# --- UYGULAMA BAŞLATMA ---
+# --- Uygulama Başlatma ---
 with app.app_context():
     load_config()
     db.create_all()
@@ -443,20 +430,11 @@ with app.app_context():
          scheduler.add_job(id='cleanup_task', func=cleanup_expired_links, trigger='cron', hour=5, minute=0)
          print("Zamanlanmış veritabanı temizlik görevi kuruldu: Her gün saat 05:00 (UTC)")
 
-    # TELEGRAM BOTUNU BAŞLATMA
     if config.get('telegram_token'):
         print("Telegram botu başlatılıyor...")
-        
-        # --- DEĞİŞİKLİK BURADA ---
-        # 'use_context=True' parametresi kütüphanenin yeni sürümlerinde
-        # kaldırıldığı için bu satırdan siliyoruz.
-        updater = Updater(config['telegram_token'])
-        
-        dp = updater.dispatcher
-        dp.add_handler(CommandHandler("start", start_command))
-        dp.add_handler(CommandHandler("sonlink", get_latest_link_command))
-        dp.add_handler(CommandHandler("yenilink", generate_new_link_command))
-        
-        # Botu ayrı bir thread'de başlatıyoruz ki Flask uygulamasını bloklamasın
-        threading.Thread(target=updater.start_polling, daemon=True).start()
+        application = Application.builder().token(config['telegram_token']).build()
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("sonlink", get_latest_link_command))
+        application.add_handler(CommandHandler("yenilink", generate_new_link_command))
+        threading.Thread(target=application.run_polling, daemon=True).start()
         print("Telegram botu başarıyla başlatıldı ve komutları dinliyor.")
