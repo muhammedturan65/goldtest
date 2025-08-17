@@ -1,4 +1,4 @@
-# render.yaml
+# render.yaml (Düzeltilmiş Versiyon)
 services:
   - type: web
     name: goldclub-manager
@@ -35,6 +35,9 @@ services:
       - key: SCHEDULER_TARGET_GROUP
         value: "TURKISH"
         
+    # --- DÜZELTME BURADA ---
+    # 'disks:' bölümü 'name', 'env', 'plan' gibi diğer servis
+    # özellikleriyle aynı hizada olmalıdır.
     disks:
       - name: goldclub-data
         mountPath: /var/data/goldclub
