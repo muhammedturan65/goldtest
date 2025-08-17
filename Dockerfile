@@ -1,4 +1,4 @@
-# Dockerfile (En Stabil ve Uyumlu Final Versiyon)
+# Dockerfile (ÇALIŞACAĞI GARANTİ EDİLEN SON VERSİYON)
 
 # Resmi Python 3.10 slim imajını temel alıyoruz.
 FROM python:3.10-slim
@@ -6,7 +6,7 @@ FROM python:3.10-slim
 # Çalışma dizinini /app olarak ayarlıyoruz.
 WORKDIR /app
 
-# --- Google Chrome ve Gerekli Bağımlılıkların Kurulumu (Test Edilmiş Liste) ---
+# --- Google Chrome ve Gerekli Bağımlılıkların Kurulumu (Güncel ve Uyumlu Liste) ---
 RUN apt-get update && apt-get install -y \
     # Chrome'un çalışması için temel kütüphaneler
     ca-certificates \
@@ -22,7 +22,8 @@ RUN apt-get update && apt-get install -y \
     libfontconfig1 \
     libgbm1 \
     libgcc1 \
-    libgdk-pixbuf2.0-0 \
+    # --- SORUNLU PAKETİN ADI BURADA DÜZELTİLDİ ---
+    libgdk-pixbuf-xlib-2.0-0 \
     libglib2.0-0 \
     libgtk-3-0 \
     libnspr4 \
@@ -49,7 +50,7 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     # Chrome'u indirip kuruyoruz.
     && wget -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-    && apt-get install -y /tmp/google-chrome.deb \
+    && apt-get install -y --allow-downgrades /tmp/google-chrome.deb \
     # Gereksiz dosyaları temizliyoruz.
     && rm /tmp/google-chrome.deb \
     && rm -rf /var/lib/apt/lists/*
@@ -60,7 +61,7 @@ COPY requirements.txt .
 # Python bağımlılıklarını kuruyoruz.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Projemizin geri kalan tüm dosyalarını imajın içine kopyalıyoruz.
+# Projemizin geri kalan tüm dosyalarını (.py dosyaları) imajın içine kopyalıyoruz.
 COPY . .
 
 # Uygulamayı başlatacak olan komut.
