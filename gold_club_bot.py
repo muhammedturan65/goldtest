@@ -1,4 +1,4 @@
-# gold_club_bot.py (Selenium Kaldırılmış, Sağlamlaştırılmış Final Versiyon)
+# gold_club_bot.py (Login Hatası Düzeltilmiş Final Versiyon)
 
 import requests
 import re
@@ -23,21 +23,18 @@ class GoldClubBot:
         print(log_message)
         if self.socketio and self.sid:
             self.socketio.emit('status_update', {'message': message, 'level': level}, to=self.sid)
-            # Eventlet'in diğer işlemlere geçebilmesi için kısa bir bekleme
             self.socketio.sleep(0)
 
-    def _get_token(self, page_content, form_action=""):
+    def _get_token(self, page_content, form_action=None):
         """Sayfa içeriğinden gizli CSRF token'ını çeker."""
         soup = BeautifulSoup(page_content, 'html.parser')
         
-        # Eğer spesifik bir form belirtilmişse, o formun içindeki token'ı ara
         if form_action:
             form = soup.find('form', {'action': re.compile(form_action)})
             if not form:
                  raise Exception(f"'{form_action}' için form bulunamadı.")
             token_input = form.find('input', {'name': 'token'})
         else:
-            # Genel olarak ilk bulduğun token'ı al
             token_input = soup.find('input', {'name': 'token'})
 
         if not token_input:
@@ -51,7 +48,9 @@ class GoldClubBot:
             response = self.session.get(login_page_url, timeout=15)
             response.raise_for_status()
             
-            token = self._get_token(response.text, "dologin.php")
+            # Formun action'ı boş olduğu için, form verilerini login sayfasının kendisine gönderiyoruz.
+            # Token'ı da spesifik bir form aramadan, sayfadaki ilk token olarak alıyoruz.
+            token = self._get_token(response.text)
             
             payload = {
                 'token': token,
@@ -60,7 +59,8 @@ class GoldClubBot:
             }
             
             self._report_status("-> Giriş yapılıyor...")
-            login_response = self.session.post(f"{self.base_url}dologin.php", data=payload, timeout=15)
+            # Post isteğini 'dologin.php' yerine 'login_page_url'e yapıyoruz.
+            login_response = self.session.post(login_page_url, data=payload, timeout=15)
             login_response.raise_for_status()
 
             if "clientarea.php" not in login_response.url and "login" in login_response.url:
@@ -109,12 +109,12 @@ class GoldClubBot:
         response = self.session.get(checkout_url, timeout=15)
         response.raise_for_status()
         
-        token = self._get_token(response.text, "cart.php?a=checkout")
+        token = self._get_token(response.text)
         final_payload = {
             'token': token,
             'i_agree': 'on',
             'notes': '',
-            'paymentmethod': '',
+            'paymentmethod': 'stripe', # Genellikle varsayılan bir değer seçmek gerekir.
             'submit': 'true'
         }
         
@@ -123,7 +123,11 @@ class GoldClubBot:
         final_response.raise_for_status()
         
         if "a=complete" not in final_response.url:
-            raise Exception("Sipariş tamamlama başarısız oldu. Muhtemelen zaten aktif bir deneme sürümü var.")
+            # Hata mesajını daha net göstermek için sayfa içeriğini loglayalım
+            soup_error = BeautifulSoup(final_response.text, 'html.parser')
+            error_div = soup_error.find('div', class_='alert-danger')
+            error_message = error_div.text.strip() if error_div else "Bilinmeyen bir hata oluştu."
+            raise Exception(f"Sipariş tamamlama başarısız oldu: {error_message}")
         
         self._report_status("-> Sipariş başarıyla tamamlandı!", level='info')
         return final_response.text
@@ -146,7 +150,6 @@ class GoldClubBot:
         
         m3u_input = details_soup.find('input', {'id': 'm3ulinks'})
         
-        # Bazen div içinde değil, bir tablonun içinde olabilir. Daha esnek bir arama yapalım.
         expiry_date_element = details_soup.find(lambda tag: 'Expiry Date:' in tag.text and tag.name == 'div')
         if not expiry_date_element:
              raise Exception("Son kullanma tarihi bulunamadı.")
