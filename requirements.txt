@@ -10,3 +10,4 @@ eventlet
 Flask-SQLAlchemy  # Veritabanı yönetimini kolaylaştırır
 psycopg2-binary   # Python'un PostgreSQL ile konuşmasını sağlar
 Werkzeug
+python-telegram-bot
