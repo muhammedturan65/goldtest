@@ -1,4 +1,4 @@
-# app.py (Tüm Düzeltmeleri İçeren Final Versiyon)
+# app.py (Kategori 1 Geliştirmeleri ve Otomatik Temizlik Eklenmiş Final Versiyon)
 
 import os
 import json
@@ -7,6 +7,7 @@ import sys
 import smtplib
 import time
 import base64
+from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, Response
 from flask_socketio import SocketIO
 from flask_apscheduler import APScheduler
@@ -16,14 +17,11 @@ from email.mime.base import MIMEBase
 from email import encoders
 from gold_club_bot import GoldClubBot
 
-# Veritabanı yönetimi için SQLAlchemy'yi ekliyoruz
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
 
 # --- Flask ve Veritabanı Kurulumu ---
 app = Flask(__name__)
-
-# Render'ın sağladığı DATABASE_URL ortam değişkenini kullanarak veritabanına bağlanıyoruz.
 database_uri = os.environ.get('DATABASE_URL', 'sqlite:///local_dev.db')
 if database_uri.startswith("postgres://"):
     database_uri = database_uri.replace("postgres://", "postgresql://", 1)
@@ -35,7 +33,7 @@ db = SQLAlchemy(app)
 socketio = SocketIO(app, async_mode='eventlet')
 scheduler = APScheduler()
 
-# --- Veritabanı Modeli (Sadeleştirildi) ---
+# --- Veritabanı Modeli ---
 class GeneratedLink(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     m3u_url = db.Column(db.Text, nullable=False)
@@ -50,8 +48,9 @@ class GeneratedLink(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
-# --- Yapılandırma ---
+# --- Yapılandırma ve E-posta Fonksiyonları (Değişiklik Yok) ---
 config = {}
+# ... (load_config ve send_email_notification fonksiyonları önceki cevaptaki gibi kalacak, buraya kopyalamıyorum) ...
 def load_config():
     """Uygulama yapılandırmasını ortam değişkenlerinden yükler."""
     global config
@@ -65,7 +64,6 @@ def load_config():
     config['notification'] = {"enabled": os.environ.get('NOTIF_ENABLED', 'false').lower() == 'true', "smtp_server": os.environ.get('SMTP_SERVER'), "smtp_port": int(os.environ.get('SMTP_PORT', 587)), "sender_email": os.environ.get('SENDER_EMAIL'), "sender_password": os.environ.get('SENDER_PASSWORD'), "receiver_email": os.environ.get('RECEIVER_EMAIL')}
     print("Yapılandırma başarıyla yüklendi.")
 
-# --- E-posta Fonksiyonu ---
 def send_email_notification(subject, body, attachment_content=None, attachment_filename=None):
     notif_config = config.get('notification', {})
     if not notif_config.get('enabled') or not notif_config.get('sender_email'): return
@@ -78,8 +76,9 @@ def send_email_notification(subject, body, attachment_content=None, attachment_f
         print(f"Bildirim e-postası başarıyla gönderildi: '{subject}'")
     except Exception as e: print(f"E-posta gönderilemedi: {e}")
 
-# --- BOT İŞLEMCİ FONKSİYONU (Sadeleştirildi) ---
+# --- BOT İŞLEMCİ FONKSİYONU (Değişiklik Yok) ---
 def process_bot_run(target_group, sid=None):
+    # ... (Bu fonksiyon da önceki gibi kalacak) ...
     result_data = GoldClubBot(email=config['email'], password=config['password'], socketio=socketio, sid=sid).run_full_process()
     if "error" in result_data or not result_data.get('url'):
         error_message = result_data.get('error', 'Bilinmeyen bir hata oluştu veya link alınamadı.')
@@ -101,7 +100,8 @@ def process_bot_run(target_group, sid=None):
 
     return {"new_link": new_link_data}
 
-# --- Zamanlanmış Görev ---
+
+# --- ZAMANLANMIŞ GÖREVLER ---
 def scheduled_task():
     print("Zamanlanmış görev başlatılıyor...");
     with app.app_context():
@@ -109,17 +109,53 @@ def scheduled_task():
         process_bot_run(target_group=target_group)
     print("Zamanlanmış görev tamamlandı.")
 
-# --- HTML TEMPLATE (Mobil Uyumlu Final Versiyon) ---
+# --- YENİ ZAMANLANMIŞ GÖREV: VERİTABANI TEMİZLİĞİ ---
+def cleanup_expired_links():
+    """Son kullanma tarihi geçmiş linkleri veritabanından siler."""
+    print("Süresi dolmuş linkler için temizlik görevi başlatılıyor...");
+    with app.app_context():
+        try:
+            # GoldClub'ın tarih formatı "Weekday, Month Day, Year" (Örn: "Tuesday, August 19, 2025")
+            # Bu formatı Python'un anlayacağı bir formata çevirmemiz gerekiyor.
+            now = datetime.now()
+            expired_links = GeneratedLink.query.all()
+            deleted_count = 0
+            for link in expired_links:
+                try:
+                    # Tarih dizesini datetime nesnesine dönüştür
+                    expiry_dt = datetime.strptime(link.expiry_date, "%A, %B %d, %Y")
+                    if expiry_dt < now:
+                        db.session.delete(link)
+                        deleted_count += 1
+                except ValueError:
+                    print(f"ID #{link.id} için tarih formatı anlaşılamadı: {link.expiry_date}")
+            
+            if deleted_count > 0:
+                db.session.commit()
+                print(f"{deleted_count} adet süresi dolmuş link veritabanından silindi.")
+            else:
+                print("Silinecek süresi dolmuş link bulunamadı.")
+        except Exception as e:
+            print(f"Temizlik görevi sırasında hata oluştu: {e}")
+
+# --- HTML TEMPLATE (Tüm Geliştirmeler Eklendi) ---
 HOME_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8"><title>M3U Link Üretici</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 1. Toastify.js Kütüphanesini Ekle -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
     <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        :root { --bg-dark: #101014; --bg-card: rgba(30, 30, 35, 0.5); --border-color: rgba(255, 255, 255, 0.1); --text-primary: #f0f0f0; --text-secondary: #a0a0a0; --accent-grad: linear-gradient(90deg, #8A2387, #E94057, #F27121); --success-color: #1ed760; --error-color: #f44336; }
+        :root { 
+            --bg-dark: #101014; --bg-card: rgba(30, 30, 35, 0.5); --border-color: rgba(255, 255, 255, 0.1); 
+            --text-primary: #f0f0f0; --text-secondary: #a0a0a0; 
+            --accent-grad: linear-gradient(90deg, #8A2387, #E94057, #F27121); 
+            --success-color: #1ed760; --error-color: #f44336; --warning-color: #f2c94c;
+        }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Manrope', sans-serif; background: var(--bg-dark); color: var(--text-primary); font-size: 15px; overflow-x: hidden; }
@@ -139,63 +175,28 @@ HOME_TEMPLATE = """
         .m3u-cell { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
         .m3u-link { word-break: break-all; background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 4px; font-family: monospace; flex-grow: 1; }
         .btn-copy { background: none; border: 1px solid var(--border-color); color: var(--text-secondary); padding: 0.4rem 0.8rem; border-radius: 20px; cursor: pointer; flex-shrink: 0; }
-
-        /* --- MOBİL UYUMLULUK DÜZELTMESİ --- */
+        
+        /* 2. Son Kullanma Tarihine Göre Renklendirme Stilleri */
+        tr.expiring td:nth-child(2) { color: var(--warning-color); font-weight: 600; }
+        tr.expired td { color: var(--text-secondary); text-decoration: line-through; }
+        tr.expired .m3u-link, tr.expired .btn-copy { opacity: 0.5; pointer-events: none; }
+        
+        /* 3. Gelişmiş Log Renklendirme Stilleri */
+        .log-line.info { color: var(--text-primary); }
+        .log-line.warning { color: var(--warning-color); }
+        .log-line.error { color: var(--error-color); font-weight: bold; }
+        
         @media (max-width: 992px) { 
             .dashboard { grid-template-columns: 1fr; } 
-            
-            .history-table thead {
-                border: none;
-                clip: rect(0 0 0 0);
-                height: 1px;
-                margin: -1px;
-                overflow: hidden;
-                padding: 0;
-                position: absolute;
-                width: 1px;
-            }
-            
-            .history-table tr {
-                display: block;
-                border-bottom: 2px solid var(--accent-grad);
-                margin-bottom: 1.5rem;
-                border-radius: 8px;
-                background: rgba(0,0,0,0.2);
-            }
-            
-            .history-table td {
-                display: block;
-                text-align: right;
-                border-bottom: 1px dotted rgba(255,255,255,0.1);
-                padding: 0.75rem;
-            }
-            .history-table td:last-child {
-                border-bottom: 0;
-            }
-            
-            .history-table td::before {
-                content: attr(data-label);
-                float: left;
-                font-weight: bold;
-                color: var(--text-secondary);
-                text-transform: uppercase;
-                font-size: 0.85em;
-            }
-
-            .m3u-cell {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 0.5rem;
-            }
-
-            .m3u-link {
-                width: 100%;
-                text-align: left;
-            }
-
-            .btn-copy {
-                align-self: flex-end;
-            }
+            .history-table thead { border: none; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; }
+            .history-table tr { display: block; border-bottom: 2px solid var(--accent-grad); margin-bottom: 1.5rem; border-radius: 8px; background: rgba(0,0,0,0.2); }
+            tr.expired { border-bottom-color: var(--border-color); }
+            .history-table td { display: block; text-align: right; border-bottom: 1px dotted rgba(255,255,255,0.1); padding: 0.75rem; }
+            .history-table td:last-child { border-bottom: 0; }
+            .history-table td::before { content: attr(data-label); float: left; font-weight: bold; color: var(--text-secondary); text-transform: uppercase; font-size: 0.85em; }
+            .m3u-cell { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+            .m3u-link { width: 100%; text-align: left; }
+            .btn-copy { align-self: flex-end; }
         }
     </style>
 </head>
@@ -204,9 +205,7 @@ HOME_TEMPLATE = """
         <h1>M3U Link Üretici</h1>
         <div class="dashboard shell">
             <div>
-                <form id="control-form">
-                    <button type="submit" id="start-btn" class="btn"><i data-feather="play-circle"></i><span>Yeni M3U Linki Üret</span></button>
-                </form>
+                <form id="control-form"><button type="submit" id="start-btn" class="btn"><i data-feather="play-circle"></i><span>Yeni M3U Linki Üret</span></button></form>
                 <h3 style="margin-top:2rem;color:var(--text-secondary);">Canlı Loglar</h3>
                 <div id="log-container"></div>
             </div>
@@ -222,6 +221,8 @@ HOME_TEMPLATE = """
         </div>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <!-- 1. Toastify.js Kütüphanesini Ekle -->
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
     <script>
         feather.replace();
         const socket = io({ transports: ['websocket'] });
@@ -231,9 +232,20 @@ HOME_TEMPLATE = """
         const historyBody = document.getElementById('history-body');
 
         function renderHistoryRow(item) {
+            // 2. Son Kullanma Tarihini Kontrol Et
+            const expiryDate = new Date(item.expiry_date.replace(/,/, ''));
+            const now = new Date();
+            const oneDay = 24 * 60 * 60 * 1000;
+            let rowClass = '';
+            if (expiryDate < now) {
+                rowClass = 'expired';
+            } else if ((expiryDate - now) < oneDay) {
+                rowClass = 'expiring';
+            }
+
             const copyButtonHTML = `<button class="btn-copy" onclick="copyLink(this, \`${item.m3u_url}\`)"><i data-feather="copy"></i></button>`;
             
-            return `<tr id="history-row-${item.id}">
+            return `<tr id="history-row-${item.id}" class="${rowClass}">
                 <td data-label="Üretim Zamanı">${new Date(item.created_at).toLocaleString('tr-TR')}</td>
                 <td data-label="Son Kullanma">${item.expiry_date}</td>
                 <td data-label="M3U Linki" class="m3u-cell">
@@ -257,13 +269,14 @@ HOME_TEMPLATE = """
 
         function copyLink(button, textToCopy) {
             navigator.clipboard.writeText(textToCopy).then(() => {
-                const originalIcon = button.innerHTML;
-                button.innerHTML = '<i data-feather="check"></i>';
-                feather.replace();
-                setTimeout(() => {
-                    button.innerHTML = originalIcon;
-                    feather.replace();
-                }, 1500);
+                // 1. Toast Bildirimi Göster
+                Toastify({
+                    text: "Link panoya kopyalandı!",
+                    duration: 3000,
+                    gravity: "bottom",
+                    position: "right",
+                    style: { background: "var(--success-color)" }
+                }).showToast();
             });
         }
 
@@ -283,15 +296,24 @@ HOME_TEMPLATE = """
                 historyBody.insertAdjacentHTML('afterbegin', renderHistoryRow(data.new_link));
             }
             feather.replace();
+            Toastify({
+                text: "Yeni link başarıyla üretildi!",
+                duration: 4000,
+                gravity: "bottom",
+                position: "right",
+                style: { background: "var(--accent-grad)" }
+            }).showToast();
         });
 
+        // 3. Gelişmiş Canlı Loglama
         socket.on('status_update', (data) => {
-            logContainer.innerHTML += `<div>${data.message.replace(/</g, "&lt;")}</div>`;
+            const level = data.level || 'info'; // Gelen level bilgisini al, yoksa 'info' varsay
+            logContainer.innerHTML += `<div class="log-line ${level}">${data.message.replace(/</g, "&lt;")}</div>`;
             logContainer.scrollTop = logContainer.scrollHeight;
         });
 
         socket.on('process_error', (data) => {
-            logContainer.innerHTML += `<div style="color: var(--error-color);">HATA: ${data.error.replace(/</g, "&lt;")}</div>`;
+            logContainer.innerHTML += `<div class="log-line error">HATA: ${data.error.replace(/</g, "&lt;")}</div>`;
             startBtn.disabled = false;
             startBtn.innerHTML = '<i data-feather="alert-triangle"></i><span>Tekrar Dene</span>';
             feather.replace();
@@ -303,7 +325,7 @@ HOME_TEMPLATE = """
 </html>
 """
 
-# --- Flask Rotaları (Sadeleştirildi) ---
+# --- Flask Rotaları ---
 @app.route('/')
 def index(): return render_template_string(HOME_TEMPLATE)
 
@@ -316,7 +338,7 @@ def get_history():
 @socketio.on('start_process')
 def handle_start_process(data):
     sid = request.sid
-    target_group = "DEFAULT" # Artık kullanılmıyor
+    target_group = "DEFAULT"
     def background_task_wrapper(sid, target_group):
         with app.app_context():
             result = process_bot_run(target_group, sid)
@@ -333,6 +355,14 @@ with app.app_context():
     if scheduler_config.get('enabled'):
         scheduler.init_app(app)
         scheduler.start()
+        # Yeni link üretme görevi
         if not scheduler.get_job('scheduled_bot_task'):
              scheduler.add_job(id='scheduled_bot_task', func=scheduled_task, trigger='cron', hour=scheduler_config.get('hour', 4), minute=scheduler_config.get('minute', 0))
-             print(f"Zamanlanmış görev kuruldu: Her gün saat {scheduler_config.get('hour', 4):02d}:{scheduler_config.get('minute', 0):02d}")
+             print(f"Zamanlanmış link üretme görevi kuruldu: Her gün saat {scheduler_config.get('hour', 4):02d}:{scheduler_config.get('minute', 0):02d}")
+        
+        # 6. VERİTABANI TEMİZLİK GÖREVİ
+        if not scheduler.get_job('cleanup_task'):
+             # Temizlik görevini farklı bir saate ayarlayalım
+             cleanup_hour = (scheduler_config.get('hour', 4) + 1) % 24 
+             scheduler.add_job(id='cleanup_task', func=cleanup_expired_links, trigger='cron', hour=cleanup_hour, minute=scheduler_config.get('minute', 0))
+             print(f"Zamanlanmış veritabanı temizlik görevi kuruldu: Her gün saat {cleanup_hour:02d}:{scheduler_config.get('minute', 0):02d}")
