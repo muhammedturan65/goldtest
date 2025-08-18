@@ -173,11 +173,14 @@ LOGIN_TEMPLATE = """
 </html>
 """
 
+# ==============================================================================
+# GÜNCELLENMİŞ HOME_TEMPLATE BAŞLANGICI
+# ==============================================================================
 HOME_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8"><title>M3U Link Üretici</title>
+    <meta charset="UTF-8"><title>M3U Link Üretici & Filtreleyici</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
     <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
@@ -194,8 +197,10 @@ HOME_TEMPLATE = """
         body { font-family: 'Manrope', sans-serif; background: var(--bg-dark); color: var(--text-primary); font-size: 15px; overflow-x: hidden; }
         body::before { content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle at 15% 25%, #8a238744, transparent 30%), radial-gradient(circle at 85% 75%, #f2712133, transparent 40%); z-index: -1; }
         .container { max-width: 1400px; margin: 2rem auto; padding: 0 1rem; }
+        .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: flex-start; }
         .shell { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 1.5rem; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-        h1 { text-align: center; margin-bottom: 2rem; font-weight: 800; }
+        h1 { text-align: center; margin-bottom: 1rem; font-weight: 800; }
+        h2 { text-align: center; margin-bottom: 2rem; color: var(--text-secondary); font-weight: 500;}
         .dashboard { display: grid; grid-template-columns: minmax(300px, 1fr) 2.5fr; gap: 2rem; align-items: flex-start; }
         .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.75rem; width: 100%; padding: 0.9rem; background: var(--accent-grad); color: white; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; font-weight: 700; margin-top: 1.5rem; text-decoration: none; }
         .btn-logout { background: var(--error-color); margin-top: 1rem; }
@@ -215,9 +220,17 @@ HOME_TEMPLATE = """
         .log-line.info { color: var(--text-primary); }
         .log-line.warning { color: var(--warning-color); }
         .log-line.error { color: var(--error-color); font-weight: bold; }
+        
+        /* YENİ FİLTRELEME BÖLÜMÜ STİLLERİ */
+        .form-group { margin-bottom: 1.5rem; }
+        label { display: block; margin-bottom: 0.5rem; color: var(--text-secondary); }
+        input[type="url"], input[type="text"] { width: 100%; padding: 0.8rem 1rem; background-color: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); font-size: 1rem; }
+        #filter_sonuc_alani { margin-top: 1rem; background-color: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; min-height: 200px; overflow-y: auto; }
+        
+        @media (max-width: 1200px) { .main-grid { grid-template-columns: 1fr; } }
         @media (max-width: 992px) { 
             .dashboard { grid-template-columns: 1fr; } 
-            .history-table thead { border: none; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; }
+            .history-table thead { display: none; }
             .history-table tr { display: block; border-bottom: 2px solid var(--accent-grad); margin-bottom: 1.5rem; border-radius: 8px; background: rgba(0,0,0,0.2); }
             tr.expired { border-bottom-color: var(--border-color); }
             .history-table td { display: block; text-align: right; border-bottom: 1px dotted rgba(255,255,255,0.1); padding: 0.75rem; }
@@ -231,49 +244,71 @@ HOME_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>M3U Link Üretici</h1>
-        <div class="dashboard shell">
-            <div>
+        <h1>M3U Link Aracı</h1>
+        <div class="main-grid">
+            <!-- SOL TARAF: LINK ÜRETİCİ -->
+            <div class="shell">
+                <h2>Link Üretici</h2>
                 <form id="control-form"><button type="submit" id="start-btn" class="btn"><i data-feather="play-circle"></i><span>Yeni M3U Linki Üret</span></button></form>
                 <a href="/logout" class="btn btn-logout">Çıkış Yap</a>
                 <h3 style="margin-top:2rem;color:var(--text-secondary);">Canlı Loglar</h3>
                 <div id="log-container"></div>
             </div>
-            <div>
-                <h3 style="margin-bottom:1rem;color:var(--text-secondary);">Geçmiş Linkler</h3>
-                <div style="max-height: 550px; overflow-y: auto;">
-                    <table class="history-table">
-                        <thead><tr><th>Üretim Zamanı</th><th>Son Kullanma</th><th>M3U Linki</th></tr></thead>
-                        <tbody id="history-body"></tbody>
-                    </table>
+
+            <!-- SAĞ TARAF: YENİ FİLTRELEME BÖLÜMÜ -->
+            <div class="shell">
+                <h2>M3U Kanal Filtreleme</h2>
+                <div class="form-group">
+                    <label for="filter_m3u_link">Filtrelenecek M3U Linki:</label>
+                    <input type="url" id="filter_m3u_link" placeholder="Yeni link üretildiğinde burası otomatik dolacak...">
                 </div>
+                <div class="form-group">
+                    <label for="filter_grup_adi">Filtrelenecek Grup Adı (Tam Adını Yazın):</label>
+                    <input type="text" id="filter_grup_adi" placeholder="Örn: HABER, SPOR, ULUSAL">
+                </div>
+                <button id="filter_btn" class="btn"><i data-feather="filter"></i><span>Kanalları Listele</span></button>
+                <div id="filter_sonuc_alani">Filtreleme sonuçları burada görünecek...</div>
             </div>
         </div>
+
+        <!-- ALT BÖLÜM: GEÇMİŞ LİNKLER -->
+        <div class="shell" style="margin-top: 2rem;">
+             <h3 style="margin-bottom:1rem;color:var(--text-secondary);">Geçmiş Linkler</h3>
+             <div style="max-height: 550px; overflow-y: auto;">
+                 <table class="history-table">
+                     <thead><tr><th>Üretim Zamanı</th><th>Son Kullanma</th><th>M3U Linki</th></tr></thead>
+                     <tbody id="history-body"></tbody>
+                 </table>
+             </div>
+        </div>
     </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
     <script>
         feather.replace();
         const socket = io({ transports: ['websocket'] });
+
+        // --- DEĞİŞKEN TANIMLAMALARI ---
         const startBtn = document.getElementById('start-btn');
         const logContainer = document.getElementById('log-container');
         const historyBody = document.getElementById('history-body');
+        // YENİ FİLTRELEME BÖLÜMÜ İÇİN DEĞİŞKENLER
+        const filterBtn = document.getElementById('filter_btn');
+        const filterM3uLinkInput = document.getElementById('filter_m3u_link');
+        const filterGrupAdiInput = document.getElementById('filter_grup_adi');
+        const filterSonucAlani = document.getElementById('filter_sonuc_alani');
 
+
+        // --- LINK ÜRETME FONKSİYONLARI ---
         function renderHistoryRow(item) {
-            // *** SAAT DİLİMİ DÜZELTMESİ (Doğrudan +3 Saat Ekleme) ***
-            // Sunucudan gelen UTC tarihini al
             const creationDateUTC = new Date(item.created_at);
-            // Üzerine 3 saat ekle
             creationDateUTC.setHours(creationDateUTC.getHours() + 3);
-            // Türkiye formatında göster
             const localCreationTime = creationDateUTC.toLocaleString('tr-TR', {
                 year: 'numeric', month: '2-digit', day: '2-digit',
                 hour: '2-digit', minute: '2-digit', second: '2-digit'
             });
 
-            // Son kullanma tarihi için renk stilleri
-            // Not: Artık item.expiry_date "dd.mm.YYYY" formatında gelecek,
-            // bu yüzden karşılaştırma için onu tekrar Date nesnesine çevirmemiz lazım.
             const expiryParts = item.expiry_date.split('.');
             const expiryDate = new Date(`${expiryParts[2]}-${expiryParts[1]}-${expiryParts[0]}`);
             const now = new Date();
@@ -293,7 +328,6 @@ HOME_TEMPLATE = """
                 </td>
             </tr>`;
         }
-
         async function fetchHistory() { 
             try { 
                 const res = await fetch('/get_history?t=' + new Date().getTime());
@@ -303,13 +337,11 @@ HOME_TEMPLATE = """
                 feather.replace();
             } catch (e) { console.error(e); } 
         }
-
         function copyLink(button, textToCopy) {
             navigator.clipboard.writeText(textToCopy).then(() => {
                 Toastify({ text: "Link panoya kopyalandı!", duration: 3000, gravity: "bottom", position: "right", style: { background: "var(--success-color)" } }).showToast();
             });
         }
-
         document.getElementById('control-form').addEventListener('submit', (e) => {
             e.preventDefault();
             startBtn.disabled = true;
@@ -319,22 +351,66 @@ HOME_TEMPLATE = """
             socket.emit('start_process', {});
         });
         
+        // --- YENİ: FİLTRELEME FONKSİYONU ---
+        filterBtn.addEventListener('click', async () => {
+            const m3uLink = filterM3uLinkInput.value;
+            const grupAdi = filterGrupAdiInput.value;
+
+            if (!m3uLink || !grupAdi) {
+                Toastify({ text: "Lütfen M3U linkini ve grup adını girin!", duration: 3000, gravity: "bottom", position: "right", style: { background: "var(--error-color)" } }).showToast();
+                return;
+            }
+
+            // Butonu devre dışı bırak ve yükleniyor durumuna getir
+            filterBtn.disabled = true;
+            filterBtn.innerHTML = '<i data-feather="loader" class="spinner"></i><span>Filtreleniyor...</span>';
+            feather.replace();
+            filterSonucAlani.innerHTML = '<p>Lütfen bekleyin...</p>';
+            
+            // !!! DİKKAT: BU ADRESİ KENDİ PHP SUNUCUNUZUN ADRESİYLE DEĞİŞTİRİN !!!
+            const phpServerUrl = 'https://goldmatch.rf.gd/ayristir.php';
+            
+            try {
+                const formData = new FormData();
+                formData.append('m3u_url', m3uLink);
+                formData.append('grup_adi', grupAdi);
+
+                const response = await fetch(phpServerUrl, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const resultHtml = await response.text();
+                filterSonucAlani.innerHTML = resultHtml;
+
+            } catch (error) {
+                console.error('Filtreleme hatası:', error);
+                filterSonucAlani.innerHTML = `<p style="color:var(--error-color);">Filtreleme sırasında bir hata oluştu. Lütfen PHP sunucu adresini kontrol edin ve tekrar deneyin.</p>`;
+            } finally {
+                // Butonu tekrar aktif et
+                filterBtn.disabled = false;
+                filterBtn.innerHTML = '<i data-feather="filter"></i><span>Kanalları Listele</span>';
+                feather.replace();
+            }
+        });
+
+        // --- SOCKET.IO OLAY DİNLEYİCİLERİ ---
         socket.on('process_complete', (data) => {
             startBtn.disabled = false;
             startBtn.innerHTML = '<i data-feather="play-circle"></i><span>Yeni M3U Linki Üret</span>';
             if (data.new_link) {
                 historyBody.insertAdjacentHTML('afterbegin', renderHistoryRow(data.new_link));
+                // YENİ EKLENDİ: Üretilen yeni linki filtreleme alanındaki input'a otomatik yaz.
+                filterM3uLinkInput.value = data.new_link.m3u_url;
             }
             feather.replace();
             Toastify({ text: "Yeni link başarıyla üretildi!", duration: 4000, gravity: "bottom", position: "right", style: { background: "var(--accent-grad)" } }).showToast();
         });
-
         socket.on('status_update', (data) => {
             const level = data.level || 'info';
             logContainer.innerHTML += `<div class="log-line ${level}">${data.message.replace(/</g, "&lt;")}</div>`;
             logContainer.scrollTop = logContainer.scrollHeight;
         });
-
         socket.on('process_error', (data) => {
             logContainer.innerHTML += `<div class="log-line error">HATA: ${data.error.replace(/</g, "&lt;")}</div>`;
             startBtn.disabled = false;
@@ -347,6 +423,10 @@ HOME_TEMPLATE = """
 </body>
 </html>
 """
+# ==============================================================================
+# GÜNCELLENMİŞ HOME_TEMPLATE SONU
+# ==============================================================================
+
 
 # --- Flask Rotaları ---
 
