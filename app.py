@@ -12,7 +12,6 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
 import requests
 
-# Diğer kodlar aynı... (Veritabanı, yapılandırma, bot fonksiyonları vs.)
 # --- Flask ve Veritabanı Kurulumu ---
 app = Flask(__name__)
 database_uri = os.environ.get('DATABASE_URL', 'sqlite:///local_dev.db')
@@ -116,7 +115,7 @@ def cleanup_expired_links():
             else: print("Silinecek süresi dolmuş link bulunamadı.")
         except Exception as e: print(f"Temizlik görevi sırasında hata oluştu: {e}")
 
-# HTML TEMPLATE'LERİNİZ BURADA YER ALIYOR (Değişiklik yok)
+# --- HTML TEMPLATE'LER ---
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="tr">
@@ -398,6 +397,7 @@ def get_history():
     links = GeneratedLink.query.order_by(desc(GeneratedLink.id)).limit(20).all()
     return jsonify([link.to_dict() for link in links])
 
+
 # ===================================================================================
 # <<<--- GÜNCELLENMİŞ "DEDEKTİF MODU" PROXY FONKSİYONU BAŞLANGICI ---<<<
 # ===================================================================================
@@ -420,11 +420,11 @@ def ayristir_proxy():
         response = requests.post(php_server_url, data=payload, headers=headers, timeout=30)
         
         # <<<--- YENİ DEDEKTİF KODU: PHP'DEN GELEN CEVABI LOGLARA YAZDIR ---<<<
+        # flush=True komutu, logların OnRender'da anında görünmesini sağlar.
         print("--- PHP SUNUCU CEVABI (DEBUG) ---", flush=True)
         print(f"Status Kodu: {response.status_code}", flush=True)
         print(f"Headerlar: {response.headers}", flush=True)
-        # Gelen cevabın tamamını log'a yazdırıyoruz.
-        print(f"Cevap İçeriği:\n{response.text}", flush=True)
+        print(f"Cevap İçeriği (RAW):\n---\n{response.text}\n---", flush=True)
         print("--- PHP SUNUCU CEVABI SONU ---", flush=True)
         
         # Cevabı tarayıcıya geri gönder
@@ -444,7 +444,7 @@ def ayristir_proxy():
 def handle_start_process(data):
     sid = request.sid
     def background_task_wrapper(sid):
-        with app.app_gpntext():
+        with app.app_context():
             result = process_bot_run(sid)
         if "error" in result: socketio.emit('process_error', {'error': result['error']}, to=sid)
         else: socketio.emit('process_complete', {'new_link': result['new_link']}, to=sid)
