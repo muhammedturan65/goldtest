@@ -1,16 +1,13 @@
-# app.py (Saat Dilimi Düzeltmesi Dahil Final Versiyon)
-
 import os
 import sys
 import smtplib
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, flash
 from flask_socketio import SocketIO
 from flask_apscheduler import APScheduler
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from gold_club_bot import GoldClubBot
-
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
 
@@ -71,31 +68,46 @@ def send_email_notification(subject, body):
         print(f"Bildirim e-postası başarıyla gönderildi: '{subject}'")
     except Exception as e: print(f"E-posta gönderilemedi: {e}")
 
-# --- BOT İŞLEMCİ FONKSİYONU ---
+# --- BOT İŞLEMCİ FONKSİYONU (GÜNCELLENDİ) ---
 def process_bot_run(sid=None):
     result_data = GoldClubBot(email=config['email'], password=config['password'], socketio=socketio, sid=sid).run_full_process()
     if "error" in result_data or not result_data.get('url'):
         error_message = result_data.get('error', 'Bilinmeyen bir hata oluştu veya link alınamadı.')
         send_email_notification("Link Oluşturma Başarısız Oldu", f"Hata: {error_message}")
         return {"error": error_message}
-    new_link = GeneratedLink(m3u_url=result_data['url'], expiry_date=result_data['expiry'])
+
+    # --- YENİ: Tarih Formatlama İşlemi ---
+    try:
+        # Gelen "Weekday, Month Day, Year" formatını datetime nesnesine çevir
+        expiry_dt = datetime.strptime(result_data['expiry'], "%A, %B %d, %Y")
+        # Yeni "dd.mm.YYYY" formatına çevir
+        formatted_expiry_date = expiry_dt.strftime("%d.%m.%Y")
+    except ValueError:
+        # Eğer format anlaşılamazsa, orijinalini kullan
+        formatted_expiry_date = result_data['expiry']
+
+    new_link = GeneratedLink(
+        m3u_url=result_data['url'],
+        expiry_date=formatted_expiry_date  # Veritabanına yeni formatta kaydet
+    )
     db.session.add(new_link)
     db.session.commit()
+    
     new_link_data = new_link.to_dict()
     subject = "Yeni M3U Linki Oluşturuldu"
-    body = f"<p>Yeni bir M3U linki başarıyla oluşturuldu.</p><ul><li><b>Link:</b> {result_data['url']}</li><li><b>Son Kullanma:</b> {result_data['expiry']}</li></ul>"
+    body = f"<p>Yeni bir M3U linki başarıyla oluşturuldu.</p><ul><li><b>Link:</b> {result_data['url']}</li><li><b>Son Kullanma:</b> {formatted_expiry_date}</li></ul>"
     send_email_notification(subject, body)
     return {"new_link": new_link_data}
 
 # --- ZAMANLANMIŞ GÖREVLER ---
 def scheduled_task():
-    print("Zamanlanmış link üretme görevi başlatılıyor...");
+    print("Zamanlanmış link üretme görevi başlatılıyor...")
     with app.app_context():
         process_bot_run()
     print("Zamanlanmış link üretme görevi tamamlandı.")
 
 def cleanup_expired_links():
-    print("Süresi dolmuş linkler için temizlik görevi başlatılıyor...");
+    print("Süresi dolmuş linkler için temizlik görevi başlatılıyor...")
     with app.app_context():
         try:
             now = datetime.now()
@@ -103,7 +115,8 @@ def cleanup_expired_links():
             deleted_count = 0
             for link in expired_links:
                 try:
-                    expiry_dt = datetime.strptime(link.expiry_date, "%A, %B %d, %Y")
+                    # Yeni format: dd.mm.YYYY
+                    expiry_dt = datetime.strptime(link.expiry_date, "%d.%m.%Y")
                     if expiry_dt < now:
                         db.session.delete(link)
                         deleted_count += 1
@@ -247,19 +260,27 @@ HOME_TEMPLATE = """
         const historyBody = document.getElementById('history-body');
 
         function renderHistoryRow(item) {
-            const expiryDate = new Date(item.expiry_date.replace(/,/, ''));
+            // *** SAAT DİLİMİ DÜZELTMESİ (Doğrudan +3 Saat Ekleme) ***
+            // Sunucudan gelen UTC tarihini al
+            const creationDateUTC = new Date(item.created_at);
+            // Üzerine 3 saat ekle
+            creationDateUTC.setHours(creationDateUTC.getHours() + 3);
+            // Türkiye formatında göster
+            const localCreationTime = creationDateUTC.toLocaleString('tr-TR', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+
+            // Son kullanma tarihi için renk stilleri
+            // Not: Artık item.expiry_date "dd.mm.YYYY" formatında gelecek,
+            // bu yüzden karşılaştırma için onu tekrar Date nesnesine çevirmemiz lazım.
+            const expiryParts = item.expiry_date.split('.');
+            const expiryDate = new Date(`${expiryParts[2]}-${expiryParts[1]}-${expiryParts[0]}`);
             const now = new Date();
             const oneDay = 24 * 60 * 60 * 1000;
             let rowClass = '';
             if (expiryDate < now) { rowClass = 'expired'; } 
             else if ((expiryDate - now) < oneDay) { rowClass = 'expiring'; }
-
-            // *** SAAT DİLİMİ DÜZELTMESİ BURADA ***
-            // Sunucudan gelen UTC tarihini (item.created_at) tarayıcının yerel saatine çevirip formatlıyoruz.
-            const localCreationTime = new Date(item.created_at).toLocaleString('tr-TR', {
-                year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit', second: '2-digit'
-            });
 
             const copyButtonHTML = `<button class="btn-copy" onclick="copyLink(this, \`${item.m3u_url}\`)"><i data-feather="copy"></i></button>`;
             
@@ -380,10 +401,10 @@ with app.app_context():
         scheduler.init_app(app)
         scheduler.start()
         if not scheduler.get_job('scheduled_bot_task'):
-             scheduler.add_job(id='scheduled_bot_task', func=scheduled_task, trigger='cron', hour=scheduler_config.get('hour', 4), minute=scheduler_config.get('minute', 0))
-             print(f"Zamanlanmış link üretme görevi kuruldu: Her gün saat {scheduler_config.get('hour', 4):02d}:{scheduler_config.get('minute', 0):02d}")
+            scheduler.add_job(id='scheduled_bot_task', func=scheduled_task, trigger='cron', hour=scheduler_config.get('hour', 4), minute=scheduler_config.get('minute', 0))
+            print(f"Zamanlanmış link üretme görevi kuruldu: Her gün saat {scheduler_config.get('hour', 4):02d}:{scheduler_config.get('minute', 0):02d}")
         
         if not scheduler.get_job('cleanup_task'):
-             cleanup_hour = (scheduler_config.get('hour', 4) + 1) % 24 
-             scheduler.add_job(id='cleanup_task', func=cleanup_expired_links, trigger='cron', hour=cleanup_hour, minute=scheduler_config.get('minute', 0))
-             print(f"Zamanlanmış veritabanı temizlik görevi kuruldu: Her gün saat {cleanup_hour:02d}:{scheduler_config.get('minute', 0):02d}")
+            cleanup_hour = (scheduler_config.get('hour', 4) + 1) % 24 
+            scheduler.add_job(id='cleanup_task', func=cleanup_expired_links, trigger='cron', hour=cleanup_hour, minute=scheduler_config.get('minute', 0))
+            print(f"Zamanlanmış veritabanı temizlik görevi kuruldu: Her gün saat {cleanup_hour:02d}:{scheduler_config.get('minute', 0):02d}")
