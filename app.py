@@ -367,7 +367,6 @@ HOME_TEMPLATE = """
 </html>
 """
 
-
 # --- Flask Rotaları ---
 
 @app.route('/')
@@ -397,15 +396,15 @@ def get_history():
     links = GeneratedLink.query.order_by(desc(GeneratedLink.id)).limit(20).all()
     return jsonify([link.to_dict() for link in links])
 
-
 # ===================================================================================
-# <<<--- GÜNCELLENMİŞ "DEDEKTİF MODU" PROXY FONKSİYONU BAŞLANGICI ---<<<
+# <<<--- GÜNCELLENMİŞ PROXY FONKSİYONU BAŞLANGICI (GET METODU) ---<<<
 # ===================================================================================
 @app.route('/ayristir_proxy', methods=['POST'])
 def ayristir_proxy():
     if 'logged_in' not in session:
         return jsonify({"error": "Unauthorized"}), 401
 
+    # Tarayıcıdan gelen POST verilerini alıyoruz, bu kısım değişmiyor.
     m3u_url = request.form.get('m3u_url')
     grup_adi = request.form.get('grup_adi')
 
@@ -413,31 +412,35 @@ def ayristir_proxy():
         return "Hata: Eksik parametre.", 400
 
     php_server_url = 'https://goldmatch.rf.gd/ayristir.php'
-    payload = { 'm3u_url': m3u_url, 'grup_adi': grup_adi }
-    headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36' }
+    
+    # Verileri URL'e eklenmesi için `params` olarak hazırlıyoruz.
+    payload = {
+        'm3u_url': m3u_url,
+        'grup_adi': grup_adi
+    }
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+    }
 
     try:
-        response = requests.post(php_server_url, data=payload, headers=headers, timeout=30)
+        # İsteği `requests.get` olarak, `params=payload` ile gönderiyoruz.
+        response = requests.get(php_server_url, params=payload, headers=headers, timeout=30)
         
-        # <<<--- YENİ DEDEKTİF KODU: PHP'DEN GELEN CEVABI LOGLARA YAZDIR ---<<<
-        # flush=True komutu, logların OnRender'da anında görünmesini sağlar.
-        print("--- PHP SUNUCU CEVABI (DEBUG) ---", flush=True)
+        print("--- PHP SUNUCU CEVABI (DEBUG - GET) ---", flush=True)
+        print(f"İstek Yapılan URL: {response.url}", flush=True)
         print(f"Status Kodu: {response.status_code}", flush=True)
-        print(f"Headerlar: {response.headers}", flush=True)
         print(f"Cevap İçeriği (RAW):\n---\n{response.text}\n---", flush=True)
         print("--- PHP SUNUCU CEVABI SONU ---", flush=True)
         
-        # Cevabı tarayıcıya geri gönder
         return response.text, response.status_code
         
     except requests.exceptions.RequestException as e:
-        # Hata durumunda da loglama yap
         print(f"!!! PROXY HATA (DEBUG) !!!\n{e}", flush=True)
         return f"Proxy hatası: PHP sunucusuna ulaşılamadı. Hata: {e}", 502
 # ===================================================================================
 # <<<--- GÜNCELLENMİŞ PROXY FONKSİYONU SONU ---<<<
 # ===================================================================================
-
 
 # --- SocketIO Olayları ---
 @socketio.on('start_process')
