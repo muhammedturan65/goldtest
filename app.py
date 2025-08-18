@@ -10,7 +10,7 @@ from email.mime.multipart import MIMEMultipart
 from gold_club_bot import GoldClubBot
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
-import requests # <-- PROXY İÇİN BU SATIR EKLENDİ
+import requests # Bu satır zaten vardı
 
 # --- Flask ve Veritabanı Kurulumu ---
 app = Flask(__name__)
@@ -69,24 +69,21 @@ def send_email_notification(subject, body):
         print(f"Bildirim e-postası başarıyla gönderildi: '{subject}'")
     except Exception as e: print(f"E-posta gönderilemedi: {e}")
 
-# --- BOT İŞLEMCİ FONKSİYONU (GÜNCELLENDİ) ---
+# --- BOT İŞLEMCİ FONKSİYONU ---
 def process_bot_run(sid=None):
     result_data = GoldClubBot(email=config['email'], password=config['password'], socketio=socketio, sid=sid).run_full_process()
     if "error" in result_data or not result_data.get('url'):
         error_message = result_data.get('error', 'Bilinmeyen bir hata oluştu veya link alınamadı.')
         send_email_notification("Link Oluşturma Başarısız Oldu", f"Hata: {error_message}")
         return {"error": error_message}
-
     try:
         expiry_dt = datetime.strptime(result_data['expiry'], "%A, %B %d, %Y")
         formatted_expiry_date = expiry_dt.strftime("%d.%m.%Y")
     except ValueError:
         formatted_expiry_date = result_data['expiry']
-
     new_link = GeneratedLink( m3u_url=result_data['url'], expiry_date=formatted_expiry_date )
     db.session.add(new_link)
     db.session.commit()
-    
     new_link_data = new_link.to_dict()
     subject = "Yeni M3U Linki Oluşturuldu"
     body = f"<p>Yeni bir M3U linki başarıyla oluşturuldu.</p><ul><li><b>Link:</b> {result_data['url']}</li><li><b>Son Kullanma:</b> {formatted_expiry_date}</li></ul>"
@@ -119,6 +116,7 @@ def cleanup_expired_links():
         except Exception as e: print(f"Temizlik görevi sırasında hata oluştu: {e}")
 
 # --- HTML TEMPLATE'LER ---
+# LOGIN_TEMPLATE VE HOME_TEMPLATE burada... (Değişiklik olmadığı için yer kaplamaması adına kodu kısalttım, sizde tam hali kalmalı)
 
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
@@ -302,7 +300,6 @@ HOME_TEMPLATE = """
             socket.emit('start_process', {});
         });
         
-        // <<<--- DEĞİŞİKLİK BURADA BAŞLIYOR ---<<<
         filterBtn.addEventListener('click', async () => {
             const m3uLink = filterM3uLinkInput.value;
             const grupAdi = filterGrupAdiInput.value;
@@ -315,7 +312,6 @@ HOME_TEMPLATE = """
             feather.replace();
             filterSonucAlani.innerHTML = '<p>Lütfen bekleyin...</p>';
             
-            // İstek artık kendi sunucumuzdaki proxy adresine yapılıyor
             const proxyUrl = '/ayristir_proxy';
             
             try {
@@ -331,7 +327,6 @@ HOME_TEMPLATE = """
                 const resultHtml = await response.text();
 
                 if (!response.ok) {
-                    // Eğer sunucudan 4xx veya 5xx gibi bir hata kodu geldiyse
                     filterSonucAlani.innerHTML = `<p style="color:var(--error-color);">${resultHtml}</p>`;
                 } else {
                     filterSonucAlani.innerHTML = resultHtml;
@@ -346,7 +341,6 @@ HOME_TEMPLATE = """
                 feather.replace();
             }
         });
-        // <<<--- DEĞİŞİKLİK BURADA BİTİYOR ---<<<
 
         socket.on('process_complete', (data) => {
             startBtn.disabled = false;
@@ -374,6 +368,7 @@ HOME_TEMPLATE = """
 </body>
 </html>
 """
+
 
 # --- Flask Rotaları ---
 
@@ -404,7 +399,10 @@ def get_history():
     links = GeneratedLink.query.order_by(desc(GeneratedLink.id)).limit(20).all()
     return jsonify([link.to_dict() for link in links])
 
-# <<<--- YENİ PROXY ROUTE'U BURAYA EKLENDİ ---<<<
+
+# ===================================================================================
+# <<<--- GÜNCELLENMİŞ PROXY FONKSİYONU BAŞLANGICI ---<<<
+# ===================================================================================
 @app.route('/ayristir_proxy', methods=['POST'])
 def ayristir_proxy():
     if 'logged_in' not in session:
@@ -423,16 +421,31 @@ def ayristir_proxy():
         'grup_adi': grup_adi
     }
 
+    # <<<--- DEĞİŞİKLİK BURADA: KENDİMİZİ TARAYICI GİBİ GÖSTEREN BAŞLIKLAR ---<<<
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+    }
+
     try:
-        # Python sunucusu, tarayıcı adına PHP sunucusuna isteği yapıyor
-        response = requests.post(php_server_url, data=payload, timeout=30)
-        # PHP'den gelen cevabı (HTML) ve durum kodunu doğrudan tarayıcıya geri döndürüyor
+        # Python sunucusu, tarayıcı adına ve TARAYICI KİMLİĞİYLE PHP sunucusuna isteği yapıyor
+        response = requests.post(php_server_url, data=payload, headers=headers, timeout=30)
+        
+        # <<<--- DEĞİŞİKLİK BURADA: GELEN CEVABI KONTROL ETME ---<<<
+        # Eğer rf.gd yine de bir hata sayfası (genellikle Cloudflare/güvenlik sayfası) dönerse,
+        # bu sayfanın içeriğinde genellikle "browser" veya "security" kelimeleri geçer.
+        if response.status_code == 200 and ("browser check" in response.text.lower() or "security check" in response.text.lower()):
+             return f"Proxy hatası: PHP sunucusu isteği bir güvenlik kontrolü ile engelledi. Ücretsiz hosting sağlayıcısı (rf.gd) script erişimine izin vermiyor.", 503
+
+        # PHP'den gelen cevabı (HTML) ve durum kodunu doğrudan tarayıcıya geri döndür
         return response.text, response.status_code
+        
     except requests.exceptions.Timeout:
         return f"Proxy hatası: PHP sunucusu ({php_server_url}) zaman aşımına uğradı.", 504
     except requests.exceptions.RequestException as e:
         return f"Proxy hatası: PHP sunucusuna ulaşılamadı. Hata: {e}", 502
-# <<<--- YENİ PROXY ROUTE'U SONU ---<<<
+# ===================================================================================
+# <<<--- GÜNCELLENMİŞ PROXY FONKSİYONU SONU ---<<<
+# ===================================================================================
 
 
 # --- SocketIO Olayları ---
