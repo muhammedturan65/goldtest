@@ -10,8 +10,9 @@ from email.mime.multipart import MIMEMultipart
 from gold_club_bot import GoldClubBot
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
-import requests # Bu satır zaten vardı
+import requests
 
+# Diğer kodlar aynı... (Veritabanı, yapılandırma, bot fonksiyonları vs.)
 # --- Flask ve Veritabanı Kurulumu ---
 app = Flask(__name__)
 database_uri = os.environ.get('DATABASE_URL', 'sqlite:///local_dev.db')
@@ -115,9 +116,7 @@ def cleanup_expired_links():
             else: print("Silinecek süresi dolmuş link bulunamadı.")
         except Exception as e: print(f"Temizlik görevi sırasında hata oluştu: {e}")
 
-# --- HTML TEMPLATE'LER ---
-# LOGIN_TEMPLATE VE HOME_TEMPLATE burada... (Değişiklik olmadığı için yer kaplamaması adına kodu kısalttım, sizde tam hali kalmalı)
-
+# HTML TEMPLATE'LERİNİZ BURADA YER ALIYOR (Değişiklik yok)
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="tr">
@@ -399,9 +398,8 @@ def get_history():
     links = GeneratedLink.query.order_by(desc(GeneratedLink.id)).limit(20).all()
     return jsonify([link.to_dict() for link in links])
 
-
 # ===================================================================================
-# <<<--- GÜNCELLENMİŞ PROXY FONKSİYONU BAŞLANGICI ---<<<
+# <<<--- GÜNCELLENMİŞ "DEDEKTİF MODU" PROXY FONKSİYONU BAŞLANGICI ---<<<
 # ===================================================================================
 @app.route('/ayristir_proxy', methods=['POST'])
 def ayristir_proxy():
@@ -414,34 +412,27 @@ def ayristir_proxy():
     if not m3u_url or not grup_adi:
         return "Hata: Eksik parametre.", 400
 
-    # Hedef PHP sunucusunun adresi
     php_server_url = 'https://goldmatch.rf.gd/ayristir.php'
-    payload = {
-        'm3u_url': m3u_url,
-        'grup_adi': grup_adi
-    }
-
-    # <<<--- DEĞİŞİKLİK BURADA: KENDİMİZİ TARAYICI GİBİ GÖSTEREN BAŞLIKLAR ---<<<
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
-    }
+    payload = { 'm3u_url': m3u_url, 'grup_adi': grup_adi }
+    headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36' }
 
     try:
-        # Python sunucusu, tarayıcı adına ve TARAYICI KİMLİĞİYLE PHP sunucusuna isteği yapıyor
         response = requests.post(php_server_url, data=payload, headers=headers, timeout=30)
         
-        # <<<--- DEĞİŞİKLİK BURADA: GELEN CEVABI KONTROL ETME ---<<<
-        # Eğer rf.gd yine de bir hata sayfası (genellikle Cloudflare/güvenlik sayfası) dönerse,
-        # bu sayfanın içeriğinde genellikle "browser" veya "security" kelimeleri geçer.
-        if response.status_code == 200 and ("browser check" in response.text.lower() or "security check" in response.text.lower()):
-             return f"Proxy hatası: PHP sunucusu isteği bir güvenlik kontrolü ile engelledi. Ücretsiz hosting sağlayıcısı (rf.gd) script erişimine izin vermiyor.", 503
-
-        # PHP'den gelen cevabı (HTML) ve durum kodunu doğrudan tarayıcıya geri döndür
+        # <<<--- YENİ DEDEKTİF KODU: PHP'DEN GELEN CEVABI LOGLARA YAZDIR ---<<<
+        print("--- PHP SUNUCU CEVABI (DEBUG) ---", flush=True)
+        print(f"Status Kodu: {response.status_code}", flush=True)
+        print(f"Headerlar: {response.headers}", flush=True)
+        # Gelen cevabın tamamını log'a yazdırıyoruz.
+        print(f"Cevap İçeriği:\n{response.text}", flush=True)
+        print("--- PHP SUNUCU CEVABI SONU ---", flush=True)
+        
+        # Cevabı tarayıcıya geri gönder
         return response.text, response.status_code
         
-    except requests.exceptions.Timeout:
-        return f"Proxy hatası: PHP sunucusu ({php_server_url}) zaman aşımına uğradı.", 504
     except requests.exceptions.RequestException as e:
+        # Hata durumunda da loglama yap
+        print(f"!!! PROXY HATA (DEBUG) !!!\n{e}", flush=True)
         return f"Proxy hatası: PHP sunucusuna ulaşılamadı. Hata: {e}", 502
 # ===================================================================================
 # <<<--- GÜNCELLENMİŞ PROXY FONKSİYONU SONU ---<<<
@@ -453,7 +444,7 @@ def ayristir_proxy():
 def handle_start_process(data):
     sid = request.sid
     def background_task_wrapper(sid):
-        with app.app_context():
+        with app.app_gpntext():
             result = process_bot_run(sid)
         if "error" in result: socketio.emit('process_error', {'error': result['error']}, to=sid)
         else: socketio.emit('process_complete', {'new_link': result['new_link']}, to=sid)
